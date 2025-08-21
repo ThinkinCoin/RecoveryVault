@@ -23,7 +23,7 @@ export const harmony = {
 };
 
 // ⚠️ Vite uses import.meta.env, not process.env
-const projectId = (import.meta.env.VITE_REOWN_PROJECT_ID || '').trim();
+const projectId = (import.meta.env.VITE_REOWN_PROJECT_ID || '6ff2ca0616c53aac6bc306fe0b678a8f').trim();
 if (!projectId) {
   console.error('[AppKit] Missing VITE_REOWN_PROJECT_ID');
 }
