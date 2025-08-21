@@ -3,7 +3,7 @@
     "rmcWallet": "0xD8194284df879f465ed61DBA6fa8300940cacEA3",
     "wONE": "0xcF664087a5bB0237a0BAd6742852ec6c8d69A27a",
     "peggedUSDC": "0xBC594CABd205bD993e7FfA6F3e9ceA75c1110da5",
-    "oracle": "0xDA7a001b254CD22e46d3eAB04d937489c93174C3",
+    "oracle": "0xA55d9ef16Af921b70Fed1421C1D298Ca5A3a18F1",
     "dailyLimitUsd": "100",
     "supportedTokens": [
       "0x985458E523dB3d53125813eD68c274899e9DfAb4",

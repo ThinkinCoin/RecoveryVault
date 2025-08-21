@@ -26,9 +26,9 @@ export default function WalletConnection() {
   }
 
   return (
-    <div className={styles.card} aria-live="polite">
+    
       <div className={styles.row}>
-        <h3>Wallet</h3>
+
         {isConnected ? (
           <div className={styles.row}>
             <span className={styles.badge} title={address}>{short}</span>
@@ -39,7 +39,7 @@ export default function WalletConnection() {
           <button className={styles.primary} onClick={() => open({ view: 'Connect' })}>Connect Wallet</button>
         )}
       </div>
-    </div>
+    
   );
 }
 

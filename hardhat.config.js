@@ -1,8 +1,10 @@
 require('@nomicfoundation/hardhat-toolbox');
-require('dotenv').config();
 require('@nomicfoundation/hardhat-verify');
 
-const privateKey = process.env.secret.DEPLOYER_PKEY || '';
+require("dotenv").config();
+
+
+const privateKey = process.env.DEPLOYER_PKEY || '';
 // Fallback initialOwner if not set via environment
 const initialOwner = process.env.INITIAL_OWNER || '0x45B96eD5d5B18f4f865266D8371C662Cd241e6D5';
 

@@ -1,117 +1,95 @@
+// src/hooks/useOnePrice.jsx
+// Single-source oracle: **Band StdReferenceProxy** only
+// All UI/console texts in English. Ethers v6.
+
 import { useCallback, useEffect, useState } from "react";
 import { Contract, isAddress, formatUnits } from "ethers";
-import ORACLE_ABI from "@/ui/abi/Oracle.json"; // usado para Band e Oracle por enquanto
+import BAND_ABI from "@/ui/abi/BandStdReferenceProxy.json"; // must expose getReferenceData(string,string)
 import { useContractContext } from "@/contexts/ContractContext";
 
+/**
+ * useOnePrice
+ * Reads ONE/USD using Band StdReferenceProxy contract.
+ * - Env: VITE_BAND_ADDRESS (proxy address)
+ * - Band returns 18-decimal rate (1e18)
+ * - No fallback to other oracles (as requested)
+ */
 export function useOnePrice() {
-  const { provider } = useContractContext();
+  const { provider } = useContractContext() ?? {};
   const band = import.meta.env.VITE_BAND_ADDRESS;
-  const oracle = import.meta.env.VITE_ORACLE_ADDRESS;
-  const oracleDecimals = Number(import.meta.env.VITE_ORACLE_DECIMALS ?? 8);
 
-  const [price, setPrice] = useState(null);
-  const [source, setSource] = useState(null);
+  const [price, setPrice] = useState(/** @type {number|null} */(null));
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(/** @type {Error|null} */(null));
+  const [lastUpdated, setLastUpdated] = useState(/** @type {{ base: number, quote: number }|null} */(null));
 
   const load = useCallback(async () => {
-    if (!provider) return null;
-
-    // 1) Band StdReference
-    if (isAddress(band)) {
-      try {
-        const code = await provider.getCode(band);
-        if (code !== "0x") {
-          const ref = new Contract(band, ORACLE_ABI, provider);
-          if (typeof ref.getReferenceData === "function") {
-            try {
-              const out = await ref.getReferenceData("ONE", "USD");
-              const rate = Array.isArray(out) ? out[0] : out?.rate;
-              if (rate != null) {
-                const p = Number(formatUnits(rate, 18)); // Band normalmente 1e18
-                return { price: p, source: "band" };
-              }
-            } catch (e) {
-              console.error("[useOnePrice] Band getReferenceData error:", e);
-            }
-          }
-        }
-      } catch (e) {
-        console.error("[useOnePrice] Band path failed:", e);
-      }
+    if (!provider || typeof provider.getCode !== "function") {
+      console.warn("[useOnePrice] Provider not ready or invalid");
+      return null;
     }
+    if (!isAddress(band)) throw new Error("VITE_BAND_ADDRESS is invalid or missing");
 
-    // 2) Custom Oracle
-    if (isAddress(oracle)) {
-      try {
-        const code = await provider.getCode(oracle);
-        if (code !== "0x") {
-          const c = new Contract(oracle, ORACLE_ABI, provider);
+    const ref = new Contract(band, BAND_ABI, provider);
 
-          // 🚫 NÃO use c[fn]. Use detecção explícita:
-          let raw = null;
-          if (typeof c.getPrice === "function") raw = await c.getPrice();
-          else if (typeof c.latestOnePrice === "function") raw = await c.latestOnePrice();
-          else if (typeof c.latestAnswer === "function") raw = await c.latestAnswer();
-          else if (typeof c.price === "function") raw = await c.price();
-          else {
-            console.warn("[useOnePrice] Oracle ABI has no compatible price function. Check your ABI.");
-          }
+    // Band: function getReferenceData(string base, string quote)
+    // returns (int256 rate, uint256 lastUpdatedBase, uint256 lastUpdatedQuote)
+    const out = await ref.getReferenceData("ONE", "USD");
 
-          if (raw != null) {
-            const val = typeof raw === "bigint" ? raw : BigInt(raw.toString());
-            const p = Number(formatUnits(val, oracleDecimals));
-            return { price: p, source: "oracle" };
-          }
-        } else {
-          console.warn("[useOnePrice] Oracle address has no code:", oracle);
-        }
-      } catch (e) {
-        console.error("[useOnePrice] oracle path error:", e);
-      }
-    }
+    // tuple or object support
+    const rate = out?.rate ?? out?.[0];
+    const baseTs = out?.lastUpdatedBase ?? out?.[1] ?? 0n;
+    const quoteTs = out?.lastUpdatedQuote ?? out?.[2] ?? 0n;
 
-    // 3) Nothing worked
-    return null;
-  }, [provider, band, oracle, oracleDecimals]);
+    if (rate == null) throw new Error("Band oracle returned empty rate");
+
+    // Band uses 18 decimals
+    const p = Number(formatUnits(rate, 18));
+
+    // Update state
+    setPrice(Number.isFinite(p) ? p : null);
+    setLastUpdated({
+      base: typeof baseTs === "bigint" ? Number(baseTs) : Number(baseTs || 0),
+      quote: typeof quoteTs === "bigint" ? Number(quoteTs) : Number(quoteTs || 0)
+    });
+
+    return p;
+  }, [provider, band]);
 
   useEffect(() => {
+    if (!provider || typeof provider.getCode !== "function") return; // wait for a valid provider
+
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const result = await load();
-
+        const p = await load();
         if (!cancelled) {
-          if (result) {
-            setPrice(result.price);
-            setSource(result.source);
-          } else {
-            // Log de diagnóstico adicional
-            console.warn("[useOnePrice] No oracle available. Env & code probe:", {
-              band,
-              oracle,
-            });
+          if (p == null) {
             setPrice(null);
-            setSource(null);
+            setLastUpdated(null);
             setError(new Error("No oracle available or all calls failed."));
           }
+          // when p is valid, state was already set inside load()
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e);
+          console.error("[useOnePrice] load error:", e);
+          setError(e instanceof Error ? e : new Error(String(e)));
           setPrice(null);
-          setSource(null);
+          setLastUpdated(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [load]);
+    return () => {
+      cancelled = true;
+    };
+  }, [load, provider]);
 
-  return { price, source, loading, error, reload: load };
+  return { price, loading, error, lastUpdated, reload: load };
 }
 
 export default useOnePrice;
