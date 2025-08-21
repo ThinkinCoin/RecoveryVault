@@ -3,6 +3,7 @@ artifacts
 .deps
 node_modules
 .env.local
-.env.production
+.env.dev
+.env.prod
 .env.secret
 cache

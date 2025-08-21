@@ -1,23 +1,12 @@
-// src/hooks/useOnePrice.jsx
 import { useCallback, useEffect, useState } from "react";
 import { Contract, isAddress, formatUnits } from "ethers";
-import BAND_ABI from "@/ui/abi/Oracle.json";   // temporarily same as ORACLE_ABI
-import ORACLE_ABI from "@/ui/abi/Oracle.json"; // ok while you keep a single ABI
+import ORACLE_ABI from "@/ui/abi/Oracle.json"; // usado para Band e Oracle por enquanto
 import { useContractContext } from "@/contexts/ContractContext";
 
-/**
- * useOnePrice
- * Tries Band StdReference first (only if ABI contains getReferenceData),
- * then falls back to a custom Oracle (getPrice/latestOnePrice/price).
- * Decimals:
- *  - Band: 1e18
- *  - Oracle: VITE_ORACLE_DECIMALS (default 8)
- * Logs in English, safe guards for wrong addresses or empty code.
- */
 export function useOnePrice() {
   const { provider } = useContractContext();
-  const band = import.meta.env.VITE_BAND_ADDRESS;       // optional
-  const oracle = import.meta.env.VITE_ORACLE_ADDRESS;   // optional
+  const band = import.meta.env.VITE_BAND_ADDRESS;
+  const oracle = import.meta.env.VITE_ORACLE_ADDRESS;
   const oracleDecimals = Number(import.meta.env.VITE_ORACLE_DECIMALS ?? 8);
 
   const [price, setPrice] = useState(null);
@@ -25,56 +14,60 @@ export function useOnePrice() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Check if an ABI fragment exists on this contract (ethers v6)
-  const hasFn = (iface, fragment) => {
-    try { iface.getFunction(fragment); return true; } catch { return false; }
-  };
-
-  // Do NOT set state inside load; return a value so the effect can respect cancel flag
   const load = useCallback(async () => {
     if (!provider) return null;
 
-    // 1) Try Band StdReference (only if ABI actually declares it)
+    // 1) Band StdReference
     if (isAddress(band)) {
       try {
         const code = await provider.getCode(band);
         if (code !== "0x") {
-          const ref = new Contract(band, BAND_ABI, provider);
-          if (hasFn(ref.interface, "getReferenceData(string,string)")) {
-            const data = await ref.getReferenceData("ONE", "USD");
-            // Some proxies return array, others a struct
-            const rate = Array.isArray(data) ? data[0] : data.rate;
-            const p = Number(formatUnits(rate, 18)); // Band uses 1e18 scale
-            return { price: p, source: "band" };
+          const ref = new Contract(band, ORACLE_ABI, provider);
+          if (typeof ref.getReferenceData === "function") {
+            try {
+              const out = await ref.getReferenceData("ONE", "USD");
+              const rate = Array.isArray(out) ? out[0] : out?.rate;
+              if (rate != null) {
+                const p = Number(formatUnits(rate, 18)); // Band normalmente 1e18
+                return { price: p, source: "band" };
+              }
+            } catch (e) {
+              console.error("[useOnePrice] Band getReferenceData error:", e);
+            }
           }
         }
       } catch (e) {
-        console.error("[useOnePrice] Band getReferenceData error:", e);
+        console.error("[useOnePrice] Band path failed:", e);
       }
     }
 
-    // 2) Fallback: custom oracle (getPrice / latestOnePrice / price)
+    // 2) Custom Oracle
     if (isAddress(oracle)) {
       try {
         const code = await provider.getCode(oracle);
         if (code !== "0x") {
           const c = new Contract(oracle, ORACLE_ABI, provider);
 
-          let fn = null;
-          if (hasFn(c.interface, "getPrice()")) fn = "getPrice";
-          else if (hasFn(c.interface, "latestOnePrice()")) fn = "latestOnePrice";
-          else if (hasFn(c.interface, "price()")) fn = "price";
+          // 🚫 NÃO use c[fn]. Use detecção explícita:
+          let raw = null;
+          if (typeof c.getPrice === "function") raw = await c.getPrice();
+          else if (typeof c.latestOnePrice === "function") raw = await c.latestOnePrice();
+          else if (typeof c.latestAnswer === "function") raw = await c.latestAnswer();
+          else if (typeof c.price === "function") raw = await c.price();
+          else {
+            console.warn("[useOnePrice] Oracle ABI has no compatible price function. Check your ABI.");
+          }
 
-          if (fn) {
-            const raw = await c[fn]();
-            const val = typeof raw === "bigint" ? raw : (raw?.toString ? BigInt(raw.toString()) : null);
-            if (val == null) throw new Error("Oracle returned unexpected value.");
-            const p = Number(formatUnits(val, oracleDecimals)); // default 1e8 unless you set VITE_ORACLE_DECIMALS
+          if (raw != null) {
+            const val = typeof raw === "bigint" ? raw : BigInt(raw.toString());
+            const p = Number(formatUnits(val, oracleDecimals));
             return { price: p, source: "oracle" };
           }
+        } else {
+          console.warn("[useOnePrice] Oracle address has no code:", oracle);
         }
       } catch (e) {
-        console.error("[useOnePrice] oracle getPrice error:", e);
+        console.error("[useOnePrice] oracle path error:", e);
       }
     }
 
@@ -89,16 +82,20 @@ export function useOnePrice() {
       setError(null);
       try {
         const result = await load();
+
         if (!cancelled) {
           if (result) {
             setPrice(result.price);
             setSource(result.source);
           } else {
+            // Log de diagnóstico adicional
+            console.warn("[useOnePrice] No oracle available. Env & code probe:", {
+              band,
+              oracle,
+            });
             setPrice(null);
             setSource(null);
-            const err = new Error("No oracle available or all calls failed.");
-            setError(err);
-            console.error("[useOnePrice]", err.message);
+            setError(new Error("No oracle available or all calls failed."));
           }
         }
       } catch (e) {
@@ -116,3 +113,5 @@ export function useOnePrice() {
 
   return { price, source, loading, error, reload: load };
 }
+
+export default useOnePrice;
