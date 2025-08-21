@@ -13,11 +13,7 @@ const ContractContext = createContext({
 
 export const useContractContext = () => useContext(ContractContext);
   // ✅ Alias para compatibilidade com componentes antigos
-  /** @deprecated Use `useContractContext` instead. */
-export const useContracts = () => {
-  console.warn("[ContractContext] `useContracts` is deprecated. Use `useContractContext`.");
-  return useContext(ContractContext);
-};
+  
 
 // ✅ e exporte o provider (se ainda não tiver)
 export function ContractProvider({ children }) {

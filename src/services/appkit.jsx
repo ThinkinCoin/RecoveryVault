@@ -16,11 +16,11 @@ export const harmony = {
   }
 };
 
-const projectId = import.meta.env.VITE_REOWN_PROJECT_ID;
+const projectId = process.env.VITE_REOWN_PROJECT_ID;
 if (!projectId) console.error('[AppKit] Missing VITE_REOWN_PROJECT_ID');
 
 const metadata = {
-  name: import.meta.env.VITE_PROJECT_NAME || 'Recovery Dex',
+  name: process.env.VITE_PROJECT_NAME || 'Recovery Dex',
   description: 'Fixed redemption UI for pre-hack wallets',
   url: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
   icons: [typeof window !== 'undefined' ? `${window.location.origin}/icon.png` : '']

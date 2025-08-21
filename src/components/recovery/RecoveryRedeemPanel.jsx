@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ethers, BrowserProvider } from 'ethers';
 import { useAppKitAccount, useAppKitProvider } from '@reown/appkit/react';
-import { useContracts } from '../../contexts/ContractContext';
+import { useContractContext } from "@/contexts/ContractContext";
 import { getDailyLimit, getFeeTier, quoteRedeem, redeem } from '../../services/vaultService';
 import AmountInput from '../shared/AmountInput';
 import Alert from '../shared/Alert';
@@ -22,7 +22,7 @@ import styles from '../../styles/Global.module.css';
 export default function RecoveryRedeemPanel() {
   const { isConnected, address } = useAppKitAccount();
   const { walletProvider } = useAppKitProvider('eip155'); // EVM namespace
-  const { provider } = useContracts();
+  const { provider } = useContractContext();
 
   const [amount, setAmount] = useState('');
   const [preferUSDC, setPreferUSDC] = useState(true);
