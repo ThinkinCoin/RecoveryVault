@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-import "../RecoveryVault.sol"; // optional if you want interface reuse
+import "../hub/interfaces/IOracle.sol"; // ou defina a interface aqui
 
 contract MockOracle is IOracle {
-    uint256 private _price;
+    int256 private _price;
+    uint8 private _decimals;
 
-    constructor(uint256 initialPrice) {
+    constructor(int256 initialPrice, uint8 initialDecimals) {
         _price = initialPrice;
+        _decimals = initialDecimals;
     }
 
-    function setPrice(uint256 newPrice) external {
+    function setPrice(int256 newPrice) external {
         _price = newPrice;
     }
 
-    function getPrice() external view override returns (uint256) {
-        return _price;
+    function setDecimals(uint8 newDecimals) external {
+        _decimals = newDecimals;
+    }
+
+    function latestPrice() external view override returns (int256 price, uint8 decimals) {
+        return (_price, _decimals);
     }
 }

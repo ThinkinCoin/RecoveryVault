@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { useContractContext } from "@/contexts/ContractContext";
-import Footer from "@/ui/layout/footer.jsx";
+import Footer from "@/ui/layout/footer";
 import * as vaultService from "@/services/vaultService";
 import { formatUnits } from "ethers";
 import { useAppKitAccount } from "@reown/appkit/react";
-import WalletConnection from "@/components/wallet/WalletConnection.jsx";
+import WalletConnection from "@/components/wallet/WalletConnection";
 import WalletChecker from "@/components/wallet/WalletChecker";
 import RedeemForm from "@/components/redeem/RedeemForm";
 import ContractFunds from "@/components/shared/ContractFunds";
-import StatusRound from "@/components/shared/StatusRound.jsx";
+import StatusRound from "@/components/shared/StatusRound";
+import LimitChecker from "@/components/wallet/LimitChecker"
 
 
 
@@ -25,7 +26,7 @@ function ReCAPTCHAMock({ value, onChange }) {
   );
 }
 
-function HeaderFrame({ roundInfo, isConnected, limitText}) {
+function HeaderFrame({ address}) {
   return (
     <header className={styles.header}>
       <div className={styles.containerWide}>
@@ -42,9 +43,7 @@ function HeaderFrame({ roundInfo, isConnected, limitText}) {
             </div>
             <div className={styles.headerRightInner}>  
               <div className="walletLimit">
-                {isConnected ? (
-                <span className={`${styles.badgeWalletLimit}`}>Available limit: <strong>{limitText ?? "$"}</strong></span>
-              ) : null}
+                <LimitChecker address={address} />
               </div>
             </div>
 
