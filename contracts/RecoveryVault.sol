@@ -45,7 +45,7 @@ contract RecoveryVault is Ownable, ReentrancyGuard {
     mapping(address => uint256) public lastRedeemTimestamp;
 
     uint256[] public feeThresholds = [100_000e18, 250_000e18, 1_000_000e18];
-    uint16[] public feeBps = [100, 50, 25, 10]; // in basis points
+    uint16[] public feeBps = [100, 50, 25, 10];
 
     modifier onlyWhitelisted(bytes32[] calldata proof) {
         require(_verifyWhitelist(msg.sender, proof), "Not whitelisted");
@@ -160,6 +160,7 @@ contract RecoveryVault is Ownable, ReentrancyGuard {
     ) external nonReentrant roundActive onlyWhitelisted(proof) {
         (,,,,,,uint256 usdValue,,,,) = quoteRedeem(msg.sender, tokenIn, amountIn, redeemIn, proof);
 
+        _resetIfNeeded(msg.sender);
         redeemedInRound[currentRound][msg.sender] += amountIn;
 
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);

@@ -233,25 +233,6 @@ export default function RedeemForm({ address, eligible, proof, defaultToken }) {
         </Alert>
       )}
 
-      {/* Live events */}
-      <section>
-        <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>Live events</div>
-        {events.length === 0 ? (
-          <div style={{ fontSize: 12, opacity: 0.6 }}>Waiting for events…</div>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
-            {events.map((ev, idx) => (
-              <li key={idx} style={{ fontSize: 12, padding: 8, borderRadius: 10, border: "1px solid #eee", background: "#fafafa" }}>
-                <div><strong>{ev.type}</strong></div>
-                <div style={{ opacity: 0.8 }}>tx: {ev.txHash}</div>
-                {typeof ev.blockNumber !== "undefined" && (
-                  <div style={{ opacity: 0.6 }}>block: {ev.blockNumber}</div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </div>
   );
 }

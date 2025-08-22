@@ -38,7 +38,9 @@ export function getVaultContract(signerOrProvider) {
  */
 export async function getDailyLimit(provider, user) {
   try {
-    const vault = getVaultContract(provider);
+    const prov = provider || getDefaultProvider();
+    if (!prov) throw new Error("provider not available");
+    const vault = getVaultContract(prov);
     const [limit, used] = await Promise.all([
       (async () => { try { return await vault.dailyLimit(user); } catch {} try { return await vault.dailyLimitUsd(); } catch {} return ZERO; })(),
       (async () => { try { return await vault.dailyUsed(user); } catch {} return ZERO; })(),
@@ -52,7 +54,9 @@ export async function getDailyLimit(provider, user) {
 
 export async function getFeeTier(provider, user, amount) {
   try {
-    const vault = getVaultContract(provider);
+    const prov = provider || getDefaultProvider();
+    if (!prov) throw new Error("provider not available");
+    const vault = getVaultContract(prov);
     try { return Number(await vault.getFeeBps(user, amount)); } catch {}
     return 100; // 1% fallback
   } catch (err) {
@@ -73,7 +77,9 @@ export async function fetchMerkleProof(user) {
 
 export async function quoteRedeem(provider, tokenIn, amount, preferUSDC = true) {
   try {
-    const vault = getVaultContract(provider);
+    const prov = provider || getDefaultProvider();
+    if (!prov) throw new Error("provider not available");
+    const vault = getVaultContract(prov);
     const result = await vault.quoteRedeem(tokenIn, amount, preferUSDC);
     if (Array.isArray(result)) {
       const [outAmount, isUSDC] = result;
@@ -202,7 +208,9 @@ export function formatUnitsSafe(value, decimals = 18) {
 /** High-level vault status */
 export async function getVaultStatus(provider) {
   try {
-    const vault = getVaultContract(provider);
+    const prov = provider || getDefaultProvider();
+    if (!prov) throw new Error("provider not available");
+    const vault = getVaultContract(prov);
     const [paused, locked, roundStart, roundFunds, roundDelay] = await Promise.all([
       (async () => { try { return Boolean(await vault.paused()); } catch { return false; } })(),
       (async () => { try { return Boolean(await vault.isLocked()); } catch { return false; } })(),

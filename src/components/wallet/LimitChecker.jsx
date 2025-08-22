@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
+import * as vaultService from "@/services/vaultService";
 import s from "@/styles/Global.module.css";
 
 /**
@@ -32,22 +33,18 @@ export default function LimitChecker({ address }) {
 
   const RPC_URL = import.meta.env.VITE_RPC_URL;
   const VAULT_ADDRESS = import.meta.env.VITE_VAULT_ADDRESS;
-  const USD_DECIMALS = Number(import.meta.env.VITE_USD_DECIMALS ?? 6);
+  const USD_DECIMALS = Number(import.meta.env.VITE_USD_DECIMALS ?? 0);
 
   const provider = useMemo(() => {
     try {
-      if (!RPC_URL) return null;
-      return new ethers.JsonRpcProvider(RPC_URL);
+      return vaultService.getDefaultProvider?.() || (RPC_URL ? new ethers.JsonRpcProvider(RPC_URL) : null);
     } catch (err) {
       console.error("[LimitChecker] Provider init error:", err);
       return null;
     }
   }, [RPC_URL]);
 
-  const VAULT_IFACE = useMemo(() => new ethers.Interface([
-    "function dailyLimitUsd() view returns (uint256)",
-    "function getUserLimit(address wallet) view returns (uint256 remainingUSD)",
-  ]), []);
+  // No local iface: we call vaultService.getDailyLimit to stay ABI-agnostic.
 
   const formatUSD = useCallback((val) => {
     const n = Number(val ?? 0);
@@ -69,25 +66,30 @@ export default function LimitChecker({ address }) {
   }, [address]);
 
   const fetchLimits = useCallback(async (user) => {
-    if (!provider) throw new Error("Provider not ready");
-    if (!VAULT_ADDRESS) throw new Error("Missing env VITE_VAULT_ADDRESS");
+    const prov = provider || vaultService.getDefaultProvider?.();
+    if (!prov) throw new Error("Provider not ready");
     if (!user) throw new Error("No wallet connected");
 
-    const contract = new ethers.Contract(VAULT_ADDRESS, VAULT_IFACE, provider);
+    const { limit, used } = await vaultService.getDailyLimit(prov, user);
+    // Raw BigInt values (expected USD integers if contract is correct)
+    let rawLimit = limit ?? 0n;
+    let rawUsed  = used  ?? 0n;
 
-    const [limitRaw, remainingRaw] = await Promise.all([
-      contract.dailyLimitUsd(),
-      contract.getUserLimit(user)
-    ]);
+    // Heuristic: if decimals=0 (USD integer) but value looks mis-scaled (>1e12), assume it was stored * 1e18 and normalize for display only
+    if (USD_DECIMALS === 0 && rawLimit > 1_000_000_000_000n) {
+      console.warn("[LimitChecker] Large dailyLimitUsd detected; displaying normalized value (÷1e18). Fix on-chain via setDailyLimit(100).");
+      rawLimit = rawLimit / 1_000_000_000_000_000_000n; // ÷ 1e18
+      rawUsed  = rawUsed  / 1_000_000_000_000_000_000n;
+    }
 
-    const limit = Number(ethers.formatUnits(limitRaw ?? 0n, USD_DECIMALS));
-    const remaining = Number(ethers.formatUnits(remainingRaw ?? 0n, USD_DECIMALS));
+    const rawRemaining = rawLimit > rawUsed ? (rawLimit - rawUsed) : 0n;
 
-    // Derive used = limit - remaining (clamped to [0, limit])
-    const used = Math.max(0, Math.min(limit, limit - remaining));
+    const limitNum     = Number(ethers.formatUnits(rawLimit,     USD_DECIMALS));
+    const usedNum      = Number(ethers.formatUnits(rawUsed,      USD_DECIMALS));
+    const remainingNum = Number(ethers.formatUnits(rawRemaining, USD_DECIMALS));
 
-    return { used, limit, remaining };
-  }, [USD_DECIMALS, VAULT_ADDRESS, VAULT_IFACE, provider]);
+    return { used: usedNum, limit: limitNum, remaining: remainingNum };
+  }, [USD_DECIMALS, provider]);
 
   const compute = useCallback(async () => {
     setIsLoading(true);
@@ -121,13 +123,8 @@ export default function LimitChecker({ address }) {
   }, [compute]);
 
   return (
-    <div className={s.contractFundsCard}>
-      <div className={s.contractFundsHeader}>
-        <span className={s.contractFundsTitle}>Daily Limit</span>
-        <button type="button" className={s.contractFundsRefreshBtn} onClick={compute} disabled={isLoading}>
-          {isLoading ? "Refreshing..." : "Refresh"}
-        </button>
-      </div>
+    <div className={`${s.walletLimit} ${s.badgeWalletLimit}`}>
+
 
       {error ? (
         <div className={s.contractFundsErrorBox} role="alert">
@@ -136,18 +133,6 @@ export default function LimitChecker({ address }) {
       ) : (
         <>
           <div className={s.contractFundsRow}>
-            <span className={s.contractFundsLabel}>Wallet</span>
-            <span className={s.contractFundsSubValue}>{account || "—"}</span>
-          </div>
-
-          <div className={s.contractFundsSep} />
-
-          <div className={s.contractFundsRow}>
-            <span className={s.contractFundsLabel}>Limit Used</span>
-            <span className={s.contractFundsValue} data-testid="limit-used">{formatUSD(usedUsd)}</span>
-          </div>
-
-          <div className={s.contractFundsRow}>
             <span className={s.contractFundsLabel}>Daily Limit</span>
             <span className={s.contractFundsValue} data-testid="daily-limit">{formatUSD(limitUsd)}</span>
           </div>
@@ -155,12 +140,6 @@ export default function LimitChecker({ address }) {
           <div className={s.contractFundsRow}>
             <span className={s.contractFundsSubLabel}>Remaining</span>
             <span className={s.contractFundsSubValue} data-testid="remaining-limit">{formatUSD(remainingUsd)}</span>
-          </div>
-
-          <div className={s.contractFundsFooter}>
-            <span className={s.contractFundsTimestamp}>
-              {lastUpdated ? `Last updated: ${lastUpdated.toLocaleString()}` : ""}
-            </span>
           </div>
         </>
       )}
