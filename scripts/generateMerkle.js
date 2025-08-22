@@ -4,9 +4,9 @@ const { MerkleTree } = require('merkletreejs');
 const keccak256 = require('keccak256');
 
 // Caminho do arquivo da lista
-const listPath = path.join(__dirname, '..', 'data', 'prehack_list.txt');
-const rootOutput = path.join(__dirname, '..', 'data', 'merkleRoot.json');
-const proofOutput = path.join(__dirname, '..', 'data', 'proofs.json');
+const listPath = path.join(__dirname, '..', 'public', 'data', 'prehack_list.txt');
+const rootOutput = path.join(__dirname, '..', 'public', 'data', 'merkleRoot.json');
+const proofOutput = path.join(__dirname, '..', 'public', 'data', 'proofs.json');
 
 // Leitura da lista
 const addresses = fs
