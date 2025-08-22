@@ -2,8 +2,8 @@
   /* Brand & theme */
   --primary:#0db7e4;
   --secondary:#5befc2;
-  --background:#0b0f1a;
-  --foreground:#0b1324;
+  --background:#0a132b;
+  --foreground:#14224070;
   --text-primary:#e5f4ff;
   --text-secondary:#9aa5b1;
   --gray-200:#e5e7eb;
@@ -23,14 +23,14 @@
 
 /* ===== THEME: Light overrides ( ===== */
 :root[data-theme="light"], .light{
-  --background:#ffffff;
-  --foreground:#f3f6fb;
+  --background:#ededed;
+  --foreground:#dbdbdb;
   --text-primary:#0b1324;
   --text-secondary:#475569;
   --brand-b:#0db7e4;
   --brand-a:#5befc2;
   --brand-gradient:linear-gradient(90deg,#0db7e4 0%,#5befc2 100%);
-  --bkg-gradient: linear-gradient(90deg, #d9e9f2 5%, #f4f5f7 75%);
+  --bkg-gradient: linear-gradient(45deg, #0db5e44d 5%, #5befc353 75%);
 }
 
 :root[data-theme="light"] .card, .light .card{ border-color:rgba(0,0,0,0.06); }
@@ -44,10 +44,14 @@
 }
 :root[data-theme="light"] .footer, .light .footer{ border-top:1px solid rgba(0,0,0,0.06); }
 
+/* Theme Toggle */
+.themetoggle{display: felx;}
+
 /* Spacing helpers */
 .mt6{ margin-top:6px; }
 
-
+/* body main fonts */
+body{font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;}
 /* ===== Layout ===== */
 .page{ min-height:100vh; display:flex; flex-direction:column; background:var(--background); background-image: var(--bkg-gradient); color:var(--text-primary); }
 .containerWide{ max-width:var(--container-max); width:100%; margin:0 auto; padding:var(--space-md); }
@@ -75,9 +79,42 @@
 .statusLocked{ background:#f97316; }
 
 /* ===== Grids & stacks ===== */
-.grid1{ display:grid; grid-template-columns:1fr; gap:var(--space-md); }
-.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:var(--space-md); }
-.grid3{ display:grid; grid-template-columns:1fr auto 1fr; gap:var(--space-md); }
+.gridInner {
+  padding: var(--space-md);
+}
+
+.grid1 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-md);
+  background: var(--foreground);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  margin: 2%;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+  background: var(--foreground);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  margin: 2%;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: var(--space-md);
+  background: var(--foreground);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  margin: 2%;
+}
 .stack{ display:grid; gap:var(--space-md); }
 .stackSm{ display:grid; gap:var(--space-sm); }
 .row{ display:flex; align-items:center; gap:var(--space-md); }
@@ -146,3 +183,59 @@
 .credits { display: flex; align-items: center;}
 .copyright{ padding: 5px; border-right: 1px solid var(--primary);  }
 .socialIcons a{ padding: 0 5px; }
+
+
+/* ===== Recovery Vault: ContractFunds component styles ===== */
+.contractFundsCard{ 
+  background:var(--foreground); 
+  color:var(--text-primary); 
+  border:1px solid rgba(255,255,255,0.06); 
+  border-radius:var(--radius); 
+  padding:var(--space-md); 
+  display:flex; 
+  flex-direction:column; 
+  gap:12px; 
+}
+.contractFundsHeader{ display:flex; justify-content:space-between; align-items:center; }
+.contractFundsTitle{ font-weight:700; font-size:16px; }
+.contractFundsRefreshBtn{ 
+  border-radius:10px; 
+  border:1px solid rgba(255,255,255,0.12); 
+  background:transparent; 
+  padding:6px 10px; 
+  cursor:pointer; 
+  font-size:12px; 
+  color:var(--text-primary);
+}
+.contractFundsRefreshBtn:hover{ border-color:var(--primary); color:var(--primary); }
+
+.contractFundsRow{ display:flex; justify-content:space-between; gap:12px; }
+.contractFundsLabel{ font-weight:600; font-size:14px; }
+.contractFundsValue{ font-weight:800; font-size:18px; }
+.contractFundsSubLabel{ opacity:0.9; }
+.contractFundsSubValue{ font-variant-numeric:tabular-nums; }
+.contractFundsMuted{ opacity:0.7; margin-left:8px; }
+.contractFundsSep{ height:1px; background:rgba(255,255,255,0.08); margin:4px 0; }
+
+.contractFundsErrorBox{ 
+  border:1px solid #ff6b6b; 
+  background:rgba(255,107,107,0.1); 
+  color:#ff8a8a; 
+  border-radius:12px; 
+  padding:12px; 
+  font-size:13px; 
+}
+
+.contractFundsFooter{ display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+.contractFundsPill{ 
+  border:1px solid rgba(255,255,255,0.12); 
+  border-radius:999px; 
+  padding:2px 8px; 
+  font-size:12px; 
+  opacity:0.9; 
+}
+.contractFundsTimestamp{ opacity:0.6; font-size:12px; }
+
+/* Light theme tweaks */
+:root[data-theme="light"] .contractFundsCard, .light .contractFundsCard{ border-color:rgba(0,0,0,0.06); }
+:root[data-theme="light"] .contractFundsRefreshBtn, .light .contractFundsRefreshBtn{ border-color:rgba(0,0,0,0.08); }
