@@ -177,7 +177,7 @@ export default function RedeemForm({ address, eligible, proof, defaultToken }) {
       setRemainingUSD(0n);
       return 0n;
     }
-  }, [vault, address]);
+  }, [vaultRead, address]);
 
   useEffect(() => { loadRemaining(); }, [loadRemaining]);
 
