@@ -176,7 +176,6 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 /* ===== Forms ===== */
 .field{ display:grid; gap:6px; }
 .input, .select{ 
-  width:100%;
   background:#0f1a2f;
   color:var(--text-primary);
   border:1px solid rgba(255,255,255,0.08);
@@ -219,6 +218,7 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 
 /* ===== Recovery Vault: ContractFunds component styles ===== */
 .contractFundsCard{ background:var(--foreground); color:var(--text-primary); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius); padding:var(--space-md); display:flex; flex-direction:column; gap:12px; }
+.contractFundsCardInner{ color:var(--text-primary);  padding:var(--space-sm); display:flex; flex-direction:column; gap:8px; }
 .contractFundsHeader{ display:flex; justify-content:space-between; align-items:center; }
 .contractFundsTitle{ font-weight:700; font-size:16px; }
 .contractFundsRefreshBtn{ border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:transparent; padding:6px 10px; cursor:pointer; font-size:12px; color:var(--text-primary); }

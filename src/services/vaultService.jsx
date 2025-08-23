@@ -293,6 +293,34 @@ export async function startNewRound(roundId, signer) {
   const c = getVaultContract(signer);
   return c.startNewRound(roundId);
 }
+export async function setDevWallet(addr, signer) {
+  const c = getVaultContract(signer);
+  return c.setDevWallet(addr);
+}
+export async function setRmcWallet(addr, signer) {
+  const c = getVaultContract(signer);
+  return c.setRmcWallet(addr);
+}
+export async function setOracle(addr, signer) {
+  const c = getVaultContract(signer);
+  return c.setOracle(addr);
+}
+export async function setMerkleRoot(root, signer) {
+  const c = getVaultContract(signer);
+  return c.setMerkleRoot(root);
+}
+export async function setSupportedToken(addr, allowed, signer) {
+  const c = getVaultContract(signer);
+  return c.setSupportedToken(addr, allowed);
+}
+export async function setFeeTiers(thresholds, bps, signer) {
+  const c = getVaultContract(signer);
+  return c.setFeeTiers(thresholds, bps);
+}
+export async function withdrawFunds(token, signer) {
+  const c = getVaultContract(signer);
+  return c.withdrawFunds(token);
+}
 
 /** High-level vault status */
 export async function getVaultStatus(provider) {

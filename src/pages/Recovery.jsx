@@ -10,7 +10,7 @@ import WalletChecker from "@/components/wallet/WalletChecker";
 import RedeemForm from "@/components/redeem/RedeemForm";
 import ContractFunds from "@/components/shared/ContractFunds";
 import StatusRound from "@/components/shared/StatusRound";
-import LimitChecker from "@/components/wallet/LimitChecker";
+//import LimitChecker from "@/components/wallet/LimitChecker";
 
 const shorten = (addr) => (addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "-");
 
@@ -38,7 +38,7 @@ function HeaderFrame({ address }) {
             </div>
             <div className={styles.headerRightInner}>
               <div className="walletLimit">
-                <LimitChecker address={address} />
+                {/*<LimitChecker address={address} />*/}
               </div>
             </div>
           </div>

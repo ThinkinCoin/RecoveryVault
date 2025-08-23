@@ -225,7 +225,7 @@ export default function ContractFunds() {
   return (
     <div className={styles.contractFundsCard}>
       <div className={styles.contractFundsHeader}>
-        <span className={styles.contractFundsTitle}>Recovery Vault Funds</span>
+        <span className={styles.contractFundsTitle}>Vault Funds</span>
         <button
           type="button"
           onClick={compute}
@@ -244,7 +244,7 @@ export default function ContractFunds() {
       ) : (
         <>
           <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsLabel}>Net USD Value</span>
+            <span className={styles.contractFundsLabel}>Net USD</span>
             <span className={styles.contractFundsValue} data-testid="net-usd">{formatUSD(netUsd)}</span>
           </div>
 
@@ -253,7 +253,7 @@ export default function ContractFunds() {
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsSubLabel}>{usdcSymbol} Balance</span>
             <span className={styles.contractFundsSubValue}>
-              {formatAmount(usdcBalance, Math.min(usdcDecimals ?? 6, 8))} {usdcSymbol}
+              {formatAmount(usdcBalance, Math.min(usdcDecimals ?? 6, 8))} 
               <span className={styles.contractFundsMuted}> ({formatUSD(usdcBalance)})</span>
             </span>
           </div>
@@ -261,7 +261,7 @@ export default function ContractFunds() {
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsSubLabel}>{woneSymbol} Balance</span>
             <span className={styles.contractFundsSubValue}>
-              {formatAmount(woneBalance, Math.min(woneDecimals ?? 18, 8))} {woneSymbol}
+              {formatAmount(woneBalance, Math.min(woneDecimals ?? 18, 8))}
               <span className={styles.contractFundsMuted}> ({oneUsdPrice ? formatUSD(woneBalance * oneUsdPrice) : "USD price unavailable"})</span>
             </span>
           </div>

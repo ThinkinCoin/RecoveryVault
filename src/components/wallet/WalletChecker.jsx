@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import styles from "@/styles/Global.module.css";
 import { TfiReload } from "react-icons/tfi";
 import { FiCheck, FiX } from "react-icons/fi";
+import LimitChecker from "@/components/wallet/LimitChecker";
 
 /**
  * Lightweight hook to get the currently connected EIP-1193 account
@@ -261,13 +262,14 @@ export default function WalletChecker({ address, proofsUrl = "/data/proofs.json"
 
   return (
     <div className={styles.contractFundsCard}>
+      <LimitChecker address={address} />
       <span className={styles.contractFundsTitle}>Wallet eligibility</span>
       {ui}
 
       {/* Optional proof details (hidden unless available). Helpful for debug / contract calls. */}
       {status === "success"}
 
-      {/* Manual re-check button */}
+      {/* Manual re-check button 
       <div style={{ marginTop: 6 }}>
         <button
           type="button"
@@ -278,6 +280,7 @@ export default function WalletChecker({ address, proofsUrl = "/data/proofs.json"
           <TfiReload size={12} />
         </button>
       </div>
+      */}
     </div>
   );
 }
