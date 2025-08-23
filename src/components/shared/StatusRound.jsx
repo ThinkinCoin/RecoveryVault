@@ -240,11 +240,6 @@ export default function StatusRound() {
           <div className={styles.contractFundsSep} />
 
           <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsSubLabel}>Round ID</span>
-            <span className={styles.contractFundsSubValue}>{Number.isFinite(Number(roundId)) ? Number(roundId).toLocaleString() : "—"}</span>
-          </div>
-
-          <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsSubLabel}>Start Time</span>
             <span className={styles.contractFundsSubValue}>{formatDate(startTime)}</span>
           </div>
@@ -253,7 +248,7 @@ export default function StatusRound() {
             <span className={styles.contractFundsSubLabel}>Current Round</span>
             <span className={styles.contractFundsSubValue}>{Number.isFinite(Number(currentRound)) ? Number(currentRound).toLocaleString() : "—"}</span>
           </div>
-
+{/*
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsSubLabel}>Locked</span>
             <span className={styles.contractFundsSubValue}>{isLocked ? "Yes" : "No"}</span>
@@ -269,6 +264,7 @@ export default function StatusRound() {
               {lastUpdated ? `Last updated: ${lastUpdated.toLocaleString()}` : ""}
             </span>
           </div>
+*/}
         </>
       )}
     </div>

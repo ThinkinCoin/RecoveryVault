@@ -20,6 +20,32 @@ export function getDefaultProvider() {
   }
 }
 
+/**
+ * Sets the fixed USD price (18 decimals) for a supported token.
+ * @param {string} token Address of the token
+ * @param {string|number} usdPrice18 Fixed price in 1e18 scale (e.g., "500000000000000000" for $0.50)
+ * @param {Signer} signer Signer connected to RecoveryVault
+ */
+export async function setFixedUsdPrice(token, usdPrice18, signer) {
+  const contract = getVaultContract(signer);
+  const tx = await contract.setFixedUsdPrice(token, usdPrice18);
+  return await tx.wait();
+}
+
+
+export async function getUserLimit(user, providerOrSigner) {
+  try {
+    const prov = providerOrSigner || getDefaultProvider();
+    if (!prov) throw new Error("provider not available");
+    const vault = getVaultContract(prov);
+    return await vault.getUserLimit(user);
+  } catch (err) {
+    console.error("[vaultService] getUserLimit error:", err);
+    return ZERO;
+  }
+}
+
+
 /** Returns RecoveryVault address from env. */
 export function getVaultAddress() {
   const addr = import.meta.env.VITE_VAULT_ADDRESS;
@@ -36,19 +62,27 @@ export function getVaultContract(signerOrProvider) {
 /**
  * Read helpers
  */
-export async function getDailyLimit(provider, user) {
+export async function getDailyLimit(providerOrSigner, user) {
   try {
-    const prov = provider || getDefaultProvider();
+    const prov = providerOrSigner || getDefaultProvider();
     if (!prov) throw new Error("provider not available");
-    const vault = getVaultContract(prov);
-    const [limit, used] = await Promise.all([
-      (async () => { try { return await vault.dailyLimit(user); } catch {} try { return await vault.dailyLimitUsd(); } catch {} return ZERO; })(),
-      (async () => { try { return await vault.dailyUsed(user); } catch {} return ZERO; })(),
+    const contract = getVaultContract(prov);
+
+    const [limit, remaining, lastRedeem] = await Promise.all([
+      (async () => { try { return await contract.dailyLimitUsd(); } catch {} return ZERO; })(),
+      (async () => { try { return user ? await contract.getUserLimit(user) : ZERO; } catch {} return ZERO; })(),
+      (async () => { try { return user ? await contract.lastRedeemTimestamp(user) : 0n; } catch {} return 0n; })(),
     ]);
-    return { limit: limit ?? ZERO, used: used ?? ZERO };
+
+    const used = (limit ?? ZERO) > (remaining ?? ZERO) ? (limit - remaining) : ZERO;
+    const lastRedeemTime = Number(lastRedeem || 0n);
+    const now = Math.floor(Date.now() / 1000);
+    const resetSeconds = lastRedeemTime ? Math.max(0, (lastRedeemTime + 86400) - now) : 0;
+
+    return { limit: limit ?? ZERO, used, lastRedeem: lastRedeemTime, resetSeconds };
   } catch (err) {
     console.error("[vaultService] getDailyLimit error:", err);
-    return { limit: ZERO, used: ZERO };
+    return { limit: ZERO, used: ZERO, lastRedeem: 0, resetSeconds: 0 };
   }
 }
 
@@ -75,27 +109,59 @@ export async function fetchMerkleProof(user) {
   }
 }
 
-export async function quoteRedeem(provider, tokenIn, amount, preferUSDC = true) {
+export async function quoteRedeem(providerOrSigner, tokenIn, amount, redeemInOrPreferUSDC = true, proof = []) {
   try {
-    const prov = provider || getDefaultProvider();
+    const prov = providerOrSigner || getDefaultProvider();
     if (!prov) throw new Error("provider not available");
-    const vault = getVaultContract(prov);
-    const result = await vault.quoteRedeem(tokenIn, amount, preferUSDC);
-    if (Array.isArray(result)) {
-      const [outAmount, isUSDC] = result;
-      return { outAmount: outAmount ?? ZERO, isUSDC: Boolean(isUSDC) };
+
+    const signer = prov.getSigner ? await prov.getSigner() : null;
+    const user = signer?.getAddress ? await signer.getAddress() : ethers.ZeroAddress;
+
+    const vault = getVaultContract(signer || prov);
+
+    let redeemIn = redeemInOrPreferUSDC;
+    if (typeof redeemIn === "boolean" || redeemIn == null) {
+      const preferUSDC = redeemIn !== false;
+      let usdcAddr = null, woneAddr = null;
+      try { usdcAddr = await vault.usdc(); } catch {}
+      try { woneAddr = await vault.wONE(); } catch {}
+      redeemIn = preferUSDC ? (usdcAddr || ethers.ZeroAddress) : (woneAddr || ethers.ZeroAddress);
     }
-    if (typeof result === "object" && result) {
-      const outAmount = result.outAmount ?? result[0] ?? ZERO;
-      const isUSDC = result.isUSDC ?? result[1] ?? preferUSDC;
-      return { outAmount, isUSDC: Boolean(isUSDC) };
-    }
-    return { outAmount: ZERO, isUSDC: preferUSDC };
+
+    const res = await vault.quoteRedeem(user, tokenIn, amount, redeemIn, proof);
+    return {
+      whitelisted: Boolean(res?.[0]),
+      roundIsActive: Boolean(res?.[1]),
+      feeAmount: res?.[2] ?? ZERO,
+      refundAmount: res?.[3] ?? ZERO,
+      userLimitUsdBefore: res?.[4] ?? ZERO,
+      userLimitUsdAfter: res?.[5] ?? ZERO,
+      usdValue: res?.[6] ?? ZERO,
+      tokenInDecimals: Number(res?.[7] ?? 0),
+      redeemInDecimals: Number(res?.[8] ?? 0),
+      oraclePrice: res?.[9] ?? ZERO,
+      oracleDecimals: Number(res?.[10] ?? 0),
+      redeemIn,
+    };
   } catch (err) {
     console.error("[vaultService] quoteRedeem error:", err);
-    return { outAmount: ZERO, isUSDC: preferUSDC };
+    return {
+      whitelisted: false,
+      roundIsActive: false,
+      feeAmount: ZERO,
+      refundAmount: ZERO,
+      userLimitUsdBefore: ZERO,
+      userLimitUsdAfter: ZERO,
+      usdValue: ZERO,
+      tokenInDecimals: 0,
+      redeemInDecimals: 0,
+      oraclePrice: ZERO,
+      oracleDecimals: 0,
+      redeemIn: null,
+    };
   }
 }
+
 
 /**
  * Execute redemption. Wrapper that tries common signatures:
@@ -104,34 +170,42 @@ export async function quoteRedeem(provider, tokenIn, amount, preferUSDC = true) 
  *  - redeemWithProof(token, amount, merkleProof)
  * Returns { hash } or null.
  */
-export async function redeem(tokenAddress, amount, merkleProof = [], signerOrProvider) {
+export async function redeem(tokenAddress, amount, a3 = null, a4 = null, a5 = null) {
   try {
-    // Resolve signer
-    let provider = signerOrProvider;
-    if (!provider) provider = getDefaultProvider();
-    if (!provider) throw new Error("No provider available");
-    const signer = provider.getSigner ? await provider.getSigner() : provider;
+    // Overloads:
+    // (token, amount, proof, signer)
+    // (token, amount, redeemIn, proof, signer)
+    let redeemIn = null;
+    let merkleProof = [];
+    let signerOrProvider = null;
+
+    if (Array.isArray(a3)) {
+      merkleProof = a3;
+      signerOrProvider = a4;
+    } else {
+      redeemIn = a3;
+      merkleProof = Array.isArray(a4) ? a4 : [];
+      signerOrProvider = a5;
+    }
+
+    let prov = signerOrProvider || getDefaultProvider();
+    if (!prov) throw new Error("No provider available");
+    const signer = prov.getSigner ? await prov.getSigner() : prov;
 
     const vault = getVaultContract(signer);
-    let tx;
 
-    if (typeof vault.redeem === "function") {
-      // Try simple 3-arg first
-      try {
-        tx = await vault.redeem(tokenAddress, amount, merkleProof);
-      } catch (e1) {
-        // Try extended signature with receiver + flag
-        try {
-          const to = await signer.getAddress();
-          tx = await vault.redeem(tokenAddress, amount, to, false, merkleProof);
-        } catch (e2) {
-          throw e2;
-        }
-      }
-    } else if (typeof vault.redeemWithProof === "function") {
-      tx = await vault.redeemWithProof(tokenAddress, amount, merkleProof);
-    } else {
-      throw new Error("Redeem function not found in ABI");
+    if (!redeemIn) {
+      try { redeemIn = await vault.usdc(); } catch {}
+    }
+
+    let tx;
+    try {
+      // Assinatura do contrato atual
+      tx = await vault.redeem(tokenAddress, amount, redeemIn, merkleProof);
+    } catch (e) {
+      // Fallback para ABIs antigas (3-arg)
+      try { tx = await vault.redeem(tokenAddress, amount, merkleProof); } catch {}
+      if (!tx) throw e;
     }
 
     console.info("[vaultService] redeem submitted:", tx.hash);
@@ -143,6 +217,7 @@ export async function redeem(tokenAddress, amount, merkleProof = [], signerOrPro
     return null;
   }
 }
+
 
 /** Subscribe to on-chain events. Returns an unsubscribe fn. */
 export function watchEvents(cb = {}, provider) {
@@ -203,6 +278,20 @@ export function formatUnitsSafe(value, decimals = 18) {
     console.error("[vaultService] formatUnitsSafe error:", err);
     return "0";
   }
+}
+
+// --- Admin helpers ---
+export async function setDailyLimit(amount, signer) {
+  const c = getVaultContract(signer);
+  return c.setDailyLimit(amount);
+}
+export async function setLocked(status, signer) {
+  const c = getVaultContract(signer);
+  return c.setLocked(status);
+}
+export async function startNewRound(roundId, signer) {
+  const c = getVaultContract(signer);
+  return c.startNewRound(roundId);
 }
 
 /** High-level vault status */

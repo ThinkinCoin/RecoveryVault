@@ -10,6 +10,7 @@ import {
   watchEvents,
 } from "@/services/vaultService";
 import { ethers } from "ethers";
+import style from "@/styles/Global.module.css";
 
 // Minimal Alert component (replace with your project <Alert /> if available)
 function Alert({ type = "info", title, children, onClose }) {
@@ -205,15 +206,7 @@ export default function RedeemForm({ address, eligible, proof, defaultToken }) {
           type="button"
           disabled={!canSubmit}
           onClick={onRedeem}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: "1px solid #0db7e4",
-            background: canSubmit ? "#0db7e4" : "#bfefff",
-            color: canSubmit ? "#fff" : "#4a7f91",
-            cursor: canSubmit ? "pointer" : "not-allowed",
-            fontWeight: 600,
-          }}
+          className={style.button}
         >
           {loading ? "Processing..." : "Redeem"}
         </button>

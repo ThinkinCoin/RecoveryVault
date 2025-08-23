@@ -30,6 +30,8 @@ export default function LimitChecker({ address }) {
   const [usedUsd, setUsedUsd] = useState(0);
   const [remainingUsd, setRemainingUsd] = useState(0);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [nextResetSeconds, setNextResetSeconds] = useState(null);
+
 
   const RPC_URL = import.meta.env.VITE_RPC_URL;
   const VAULT_ADDRESS = import.meta.env.VITE_VAULT_ADDRESS;
@@ -70,7 +72,7 @@ export default function LimitChecker({ address }) {
     if (!prov) throw new Error("Provider not ready");
     if (!user) throw new Error("No wallet connected");
 
-    const { limit, used } = await vaultService.getDailyLimit(prov, user);
+    const { limit, used, resetSeconds } = await vaultService.getDailyLimit(prov, user);
     // Raw BigInt values (expected USD integers if contract is correct)
     let rawLimit = limit ?? 0n;
     let rawUsed  = used  ?? 0n;
@@ -78,9 +80,10 @@ export default function LimitChecker({ address }) {
     // Heuristic: if decimals=0 (USD integer) but value looks mis-scaled (>1e12), assume it was stored * 1e18 and normalize for display only
     if (USD_DECIMALS === 0 && rawLimit > 1_000_000_000_000n) {
       console.warn("[LimitChecker] Large dailyLimitUsd detected; displaying normalized value (÷1e18). Fix on-chain via setDailyLimit(100).");
-      rawLimit = rawLimit / 1_000_000_000_000_000_000n; // ÷ 1e18
+      rawLimit = rawLimit / 1_000_000_000_000_000_000n;
       rawUsed  = rawUsed  / 1_000_000_000_000_000_000n;
     }
+
 
     const rawRemaining = rawLimit > rawUsed ? (rawLimit - rawUsed) : 0n;
 
@@ -88,8 +91,25 @@ export default function LimitChecker({ address }) {
     const usedNum      = Number(ethers.formatUnits(rawUsed,      USD_DECIMALS));
     const remainingNum = Number(ethers.formatUnits(rawRemaining, USD_DECIMALS));
 
-    return { used: usedNum, limit: limitNum, remaining: remainingNum };
+    return { used: usedNum, limit: limitNum, remaining: remainingNum, resetSeconds };
   }, [USD_DECIMALS, provider]);
+
+  useEffect(() => {
+    const countdown = setInterval(() => {
+      setNextResetSeconds(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(countdown);
+  }, []);
+
+  const formatTime = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h}h ${m}m ${s}s`;
+  };
+
+
+
 
   const compute = useCallback(async () => {
     setIsLoading(true);
@@ -99,11 +119,11 @@ export default function LimitChecker({ address }) {
       setAccount(acc);
       if (!acc) throw new Error("Connect your wallet to view your daily limit");
 
-      const { used, limit, remaining } = await fetchLimits(acc);
+      const { used, limit, remaining, resetSeconds } = await fetchLimits(acc);
       setUsedUsd(used);
       setLimitUsd(limit);
       setRemainingUsd(remaining);
-      setLastUpdated(new Date());
+      setNextResetSeconds(resetSeconds);
     } catch (err) {
       console.error("[LimitChecker] compute error:", err);
       setError(err?.message || "Unexpected error while fetching limits");
@@ -141,6 +161,13 @@ export default function LimitChecker({ address }) {
             <span className={s.contractFundsSubLabel}>Remaining</span>
             <span className={s.contractFundsSubValue} data-testid="remaining-limit">{formatUSD(remainingUsd)}</span>
           </div>
+          {nextResetSeconds !== null && nextResetSeconds > 0 && (
+          <div className={s.contractFundsRow}>
+            <span className={s.contractFundsSubLabel}>Resets in</span>
+            <span className={s.contractFundsSubValue}>{formatTime(nextResetSeconds)}</span>
+          </div>
+        )}
+
         </>
       )}
     </div>
