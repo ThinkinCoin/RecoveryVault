@@ -78,7 +78,7 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 .roundNumber{ font-size:18px; font-weight:700; }
 .statusLine{ margin-top:4px; font-size:12px; display:inline-flex; gap:8px; align-items:center; }
 .statusDot{ width:8px; height:8px; border-radius:50%; background:var(--secondary); display:inline-block; }
-.statusOpen{ background:var(--secondary); }
+.statusOpen{ background:var(--secondary); color:#222}
 .statusLocked{ background:#f97316; }
 
 /* ===== Grids & stacks ===== */
@@ -199,6 +199,7 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 .button:active{ transform:translateY(1px); }
 .buttonBlock{ width:100%; }
 .buttonAccent{ background:var(--secondary); color:#0b1324; font-weight:700; border-color:var(--secondary); }
+.buttonWarn{ background:#b00000; color:#ededed; font-weight:700; border-color:#ffffff; }
 .buttonActive{ background:var(--primary); border-color:var(--primary); color:#0b1324; }
 
 /* ===== Alerts ===== */

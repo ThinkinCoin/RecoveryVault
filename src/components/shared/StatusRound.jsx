@@ -1,46 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 import styles from "@/styles/Global.module.css";
+import * as vaultService from "@/services/vaultService";
 
 /**
- * StatusRound.jsx
+ * StatusRound.jsx (refactor to use vaultService)
  * -------------------------------------------------------------
- * Reads RecoveryVault round status and shows a color-coded badge:
- * - Open = Green
- * - Paused = Grey
- * - On Delay Time = Yellow
- * - Stopped / Finished = Red
+ * Keeps the original legacy structure and styles (contractFunds*),
+ * but replaces on-chain reads with vaultService helpers.
  *
  * Expected Vite envs:
  * - VITE_RPC_URL
  * - VITE_VAULT_ADDRESS
- * - VITE_BAND_ADDRESS (optional, not required here)
- * - VITE_ROUND_LOOKBACK_BLOCKS (optional, default 200000)
+ * - VITE_ROUND_LOOKBACK_BLOCKS (no longer used here, kept for compatibility)
  *
- * Contract API used (ethers v6):
- * - function currentRound() view returns (uint256)
- * - function isLocked() view returns (bool)
- * - function paused() view returns (bool)  // if Pausable; handled with try/catch
- * - event NewRoundStarted(uint256 roundId, uint256 startTime)
- * - event VaultPaused(bool isPaused)       // optional decoding; not required if paused() exists
- *
- * All logs and UI strings are in English.
+ * Contract API via vaultService (ethers v6):
+ * - getRoundInfo(provider)              // returns struct/tuple with round metadata
+ * - isLocked(provider)                  // returns bool
+ * - getVaultContract(provider).paused() // (try/catch) optional if Pausable
  * -------------------------------------------------------------
  */
-
-const VAULT_IFACE = new ethers.Interface([
-  "function currentRound() view returns (uint256)",
-  "function isLocked() view returns (bool)",
-  "function paused() view returns (bool)",
-  "event NewRoundStarted(uint256 roundId, uint256 startTime)",
-  "event VaultPaused(bool isPaused)"
-]);
-
-// Log scan tuning
-const DEFAULT_LOOKBACK = 200_000; // blocks
-const LOGS_CHUNK_DEFAULT = 1_000; // blocks per query window (will be reduced on RPC error)
-const LOGS_CHUNK_MIN = 128; // minimum window size to try
-
 
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
@@ -53,6 +32,26 @@ function formatDate(tsSeconds) {
   try {
     return new Date(n * 1000).toLocaleString();
   } catch { return "—"; }
+}
+
+// Safe number extraction from possible struct/tuple
+function toNum(v, d = 0) {
+  try {
+    if (typeof v === "bigint") return Number(v);
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() !== "") return Number(v);
+  } catch {}
+  return d;
+}
+
+function firstNum(obj, keys, d = 0) {
+  for (const k of keys) {
+    if (obj && Object.prototype.hasOwnProperty.call(obj, k)) {
+      const n = toNum(obj[k], undefined);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return d;
 }
 
 export default function StatusRound() {
@@ -70,10 +69,6 @@ export default function StatusRound() {
   const [lastUpdated, setLastUpdated] = useState(null);
 
   const RPC_URL = import.meta.env.VITE_RPC_URL;
-  const VAULT_ADDRESS = import.meta.env.VITE_VAULT_ADDRESS;
-  const LOOKBACK = Number(import.meta.env.VITE_ROUND_LOOKBACK_BLOCKS ?? DEFAULT_LOOKBACK);
-  const LOGS_CHUNK = Number(import.meta.env.VITE_LOGS_CHUNK ?? LOGS_CHUNK_DEFAULT);
-
   const provider = useMemo(() => {
     try {
       if (!RPC_URL) return null;
@@ -85,41 +80,6 @@ export default function StatusRound() {
   }, [RPC_URL]);
 
   const intervalRef = useRef(null);
-
-  // Bounded, chunked log scanner to avoid RPC limits like "GetLogs query must be smaller than size 1024"
-  const findLastLog = useCallback(async (topicHash) => {
-    if (!provider) throw new Error("Provider not ready");
-    const latest = await provider.getBlockNumber();
-    const from = Math.max(0, latest - LOOKBACK);
-
-    let end = latest;
-    let chunk = Math.max(LOGS_CHUNK_MIN, LOGS_CHUNK);
-
-    while (end >= from) {
-      const start = Math.max(from, end - chunk + 1);
-      try {
-        const logs = await provider.getLogs({ address: VAULT_ADDRESS, fromBlock: start, toBlock: end, topics: [topicHash] });
-        if (logs && logs.length) {
-          return logs[logs.length - 1];
-        }
-        end = start - 1; // move window backward
-      } catch (err) {
-        const msg = String(err?.message || '').toLowerCase();
-        if (err?.code === -32000 || msg.includes('smaller than size') || msg.includes('query must be smaller')) {
-          // shrink the window and retry
-          const next = Math.max(LOGS_CHUNK_MIN, Math.floor(chunk / 2));
-          if (next === chunk) {
-            // can't shrink further: step back and continue
-            end = Math.max(from, end - chunk);
-          }
-          chunk = next;
-          continue;
-        }
-        throw err; // non-range error
-      }
-    }
-    return null;
-  }, [LOGS_CHUNK, LOOKBACK, VAULT_ADDRESS, provider]);
 
   const computeStatus = useCallback((paused, locked, hasRound) => {
     if (paused) {
@@ -136,67 +96,64 @@ export default function StatusRound() {
 
   const fetchState = useCallback(async () => {
     if (!provider) throw new Error("Provider not ready");
-    if (!VAULT_ADDRESS) throw new Error("Missing env VITE_VAULT_ADDRESS");
 
-    const contract = new ethers.Contract(VAULT_ADDRESS, VAULT_IFACE, provider);
+    // 1) Round info via vaultService (structure may vary by contract build)
+    let info = null;
+    try {
+      info = await vaultService.getRoundInfo(provider);
+    } catch (e) {
+      console.error("[StatusRound] getRoundInfo() failed", e);
+    }
 
-    // Read simple states first
-    const [crRaw, lockedRaw] = await Promise.all([
-      contract.currentRound().catch((e) => { console.error("[StatusRound] currentRound() failed", e); return 0n; }),
-      contract.isLocked().catch((e) => { console.error("[StatusRound] isLocked() failed", e); return false; })
-    ]);
+    // Extract roundId / currentRound / startTime from struct or tuple
+    // Common keys tried: roundId, currentRound, id, startTime, redeemStartsAt
+    let rid = 0;
+    let cr = 0;
+    let st = 0;
 
-    const cr = Number(crRaw ?? 0n);
-    const locked = Boolean(lockedRaw);
+    if (info && typeof info === "object") {
+      rid = firstNum(info, ["roundId", "currentRound", "id", "round", 0], 0);
+      cr  = firstNum(info, ["currentRound", "roundId", "id", "round", 0], rid);
+      st  = firstNum(info, ["redeemStartsAt", "startTime", 1], 0);
 
-    // paused() may not exist in some builds; handle gracefully
+      // Tuples (arrays) fallback
+      if (Array.isArray(info)) {
+        // Typically [roundId, startTime, ...]
+        rid = toNum(info[0], rid);
+        st  = toNum(info[1], st);
+      }
+    }
+
+    // 2) Locked flag
+    let locked = false;
+    try {
+      locked = Boolean(await vaultService.isLocked(provider));
+    } catch (e) {
+      console.error("[StatusRound] isLocked() failed", e);
+    }
+
+    // 3) Paused flag (optional)
     let paused = false;
     try {
-      paused = await contract.paused();
-    } catch (e) {
-      try {
-        const pausedEv = VAULT_IFACE.getEvent("VaultPaused").topicHash;
-        const lastPausedLog = await findLastLog(pausedEv);
-        if (lastPausedLog) {
-          const parsed = VAULT_IFACE.parseLog(lastPausedLog);
-          if (parsed?.args && typeof parsed.args[0] !== 'undefined') {
-            paused = Boolean(parsed.args[0]);
-          }
-        }
-      } catch (ee) {
-        console.error("[StatusRound] paused() not available; unable to infer from VaultPaused logs", ee);
-      }
-    }
-
-    // Find last NewRoundStarted for roundId / startTime
-    let rid = cr;
-    let st = 0;
-    try {
-      const newRoundEv = VAULT_IFACE.getEvent("NewRoundStarted").topicHash;
-      const lastNewRoundLog = await findLastLog(newRoundEv);
-      if (lastNewRoundLog) {
-        const parsed = VAULT_IFACE.parseLog(lastNewRoundLog);
-        if (parsed?.args) {
-          const evRoundId = Number(parsed.args[0] ?? 0);
-          const evStart = Number(parsed.args[1] ?? 0);
-          rid = Number.isFinite(evRoundId) && evRoundId > 0 ? evRoundId : cr;
-          st = Number.isFinite(evStart) ? evStart : 0;
-        }
+      const c = vaultService.getVaultContract(provider);
+      if (c && typeof c.paused === "function") {
+        paused = Boolean(await c.paused());
       }
     } catch (e) {
-      console.error("[StatusRound] NewRoundStarted log scan failed", e);
+      // If not Pausable, ignore
     }
-    const derived = computeStatus(paused, locked, (rid ?? 0) > 0);
 
-    setCurrentRound(cr);
-    setRoundId(rid);
-    setStartTime(st);
+    const derived = computeStatus(paused, locked, (rid ?? 0) > 0 || (cr ?? 0) > 0);
+
+    setCurrentRound(cr || rid || 0);
+    setRoundId(rid || cr || 0);
+    setStartTime(st || 0);
     setIsLocked(locked);
     setIsPaused(paused);
     setStatusLabel(derived.label);
     setStatusClass(derived.cls);
     setLastUpdated(new Date());
-  }, [LOOKBACK, VAULT_ADDRESS, computeStatus, provider]);
+  }, [computeStatus, provider]);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
@@ -248,7 +205,7 @@ export default function StatusRound() {
             <span className={styles.contractFundsSubLabel}>Current Round</span>
             <span className={styles.contractFundsSubValue}>{Number.isFinite(Number(currentRound)) ? Number(currentRound).toLocaleString() : "—"}</span>
           </div>
-{/*
+
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsSubLabel}>Locked</span>
             <span className={styles.contractFundsSubValue}>{isLocked ? "Yes" : "No"}</span>
@@ -258,7 +215,7 @@ export default function StatusRound() {
             <span className={styles.contractFundsSubLabel}>Paused</span>
             <span className={styles.contractFundsSubValue}>{isPaused ? "Yes" : "No"}</span>
           </div>
-
+{/*
           <div className={styles.contractFundsFooter}>
             <span className={styles.contractFundsTimestamp}>
               {lastUpdated ? `Last updated: ${lastUpdated.toLocaleString()}` : ""}
