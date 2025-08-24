@@ -184,6 +184,19 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 }
 .input:focus, .select:focus{ outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(13,183,228,0.2); }
 .captchaLabel{ display:flex; align-items:center; gap:8px; }
+.selectDropdown {
+  width: 120px;
+  left: 0px;
+  right: 0px;
+  top: calc(100% + 6px);
+  z-index: 200;
+  list-style: none;
+  margin: 0px;
+  background: var(--background);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius);
+  padding: var(--space-md);}
 
 /* ===== Buttons ===== */
 .button{

@@ -7,6 +7,8 @@ import { ethers } from "ethers";
 import * as vaultService from "@/services/vaultService";
 import styles from "@/styles/Global.module.css";
 import ReCAPTCHA from "react-google-recaptcha";
+import TokenSelector from "@/components/shared/TokenSelect";
+import { getTokens } from "@/services/tokenService";
 
 // Minimal Alert using project styles
 function Alert({ type = "info", children }) {
@@ -163,6 +165,22 @@ export default function RedeemForm({ address, eligible, proof, defaultToken }) {
     return () => { alive = false; };
   }, [vaultRead, readProvider, address, defaultToken]);
 
+  // Selected token for TokenSelector (enriched with logo when possible)
+  const selectedToken = useMemo(() => {
+    try {
+      const addr = (tokenIn || "").toLowerCase();
+      if (!addr) return null;
+      const inSupported = supported.find(t => (t.address || "").toLowerCase() === addr);
+      if (inSupported) {
+        const list = getTokens() || [];
+        const meta = list.find(t => (t.address || "").toLowerCase() === addr);
+        return meta ? { ...inSupported, logoURI: meta.logoURI } : inSupported;
+      }
+      const list = getTokens() || [];
+      return list.find(t => (t.address || "").toLowerCase() === addr) || null;
+    } catch { return null; }
+  }, [tokenIn, supported]);
+
   // Refresh tokenIn info (symbol/decimals/balance)
   useEffect(() => {
     let alive = true;
@@ -313,15 +331,11 @@ export default function RedeemForm({ address, eligible, proof, defaultToken }) {
 
       {/* Token In */}
       <div className={styles.field}>
-        <label className={styles.smallMuted}>Token to redeem (supported by vault)</label>
-        <select className={styles.select} value={tokenIn} onChange={(e) => setTokenIn(e.target.value)}>
-          <option value="">— Select token —</option>
-          {supported.map((t) => (
-            <option key={t.address} value={t.address}>
-              {t.symbol} · {shorten(t.address)}
-            </option>
-          ))}
-        </select>
+        <TokenSelector
+          label="Token to burn (supported by vault)"
+          selectedToken={selectedToken}
+          onSelect={(t) => setTokenIn(t?.address || "")}
+        />
         <div className={styles.smallMuted}>Balance: {fmt(balanceText, 4)} {tokenInInfo.symbol}</div>
       </div>
 

@@ -1,0 +1,22 @@
+{
+  "name": "Harmony Tokens List",
+  "chainId": 1666600000,
+  "tokens": [
+            {
+              "address": "0xBC594CABd205bD993e7FfA6F3e9ceA75c1110da5",
+              "chainId": 1666600000,
+              "decimals": 6,
+              "logoURI": "@/assets/logos/USDC.jpg",
+              "name": "USD Coin",
+              "symbol": "USDC"
+            },
+            {
+              "address": "0xcF664087a5bB0237a0BAd6742852ec6c8d69A27a",
+              "chainId": 1666600000,
+              "decimals": 18,
+              "logoURI": "@/assets/logos/WONE.jpg",
+              "name": "Wrapped ONE",
+              "symbol": "WONE"
+   }
+  ]
+}  
