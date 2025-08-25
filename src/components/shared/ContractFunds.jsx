@@ -213,7 +213,7 @@ export default function ContractFunds() {
     // auto refresh each 60s
     intervalRef.current = setInterval(() => {
       compute();
-    }, 60_000);
+    }, 600_000);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);

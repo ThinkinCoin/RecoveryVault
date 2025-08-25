@@ -47,7 +47,8 @@
   background:#ffffff; border:1px solid rgba(0,0,0,0.08);
 }
 :root[data-theme="light"] .footer, .light .footer{ border-top:1px solid rgba(0,0,0,0.06); }
-
+:root[data-theme="light"] .recaptchaBkg{color-scheme:light;}
+:root[data-theme="dark"] .recaptchaBkg{color-scheme:dark;}
 /* Theme Toggle */
 .themetoggle{display:flex;}
 
@@ -90,7 +91,6 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
   gap: var(--space-md);
   background: var(--foreground);
   color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius);
   margin: clamp(0px, 2vw, 2%);
 }
@@ -100,7 +100,6 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
   grid-template-columns: 1fr 1fr;
   gap: var(--space-md);
   color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius);
   margin: clamp(0px, 2vw, 2%);
 }
@@ -110,7 +109,6 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
   grid-template-columns: 1fr auto 1fr;
   gap: var(--space-md);
   color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius);
   margin: clamp(0px, 2vw, 2%);
 }
@@ -134,6 +132,7 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 /* ====== Responsive: mobile ====== */
 @media (max-width: 768px){
   .headerInner{ grid-template-columns:1fr; text-align:center; row-gap:var(--space-sm); }
+  .headerLeft{justify-content: center;}
   .headerRight{ flex-direction:row; justify-content:center; align-items:center; gap:8px; }
   .headerRightInner{ flex-direction:row; gap:8px; margin:2px 0; }
   .logoImg{ height:60px; }
@@ -163,6 +162,7 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
   .contractFundsTitle{ font-size:14px; }
   .button{ width:100%; }
   .ButtonIconClean{ padding:6px 8px; }
+  .headerLeft {justify-items: center;}
 }
 
 /* ===== Cards & text ===== */

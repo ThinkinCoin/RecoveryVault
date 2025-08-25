@@ -13,7 +13,6 @@ const toLower = (x) => (x || "").toString().toLowerCase();
 const isAddr = (a) => ethers.isAddress(a || "");
 const isBytes32 = (h) => ethers.isHexString((h || "").trim(), 32);
 
-// Badges + UTC formatter
 // --- Tx helpers ---
 function txHashOf(x){ try { return x?.hash ?? x?.transactionHash ?? (typeof x === "string" ? x : ""); } catch { return ""; } }
 async function waitReceipt(tx, signerOrProvider){
@@ -136,7 +135,7 @@ export default function AdminDash() {
     try {
       setLoadingOwner(true);
       if (!provider) throw new Error("Provider not available");
-      const c = vaultService.getVaultContract(provider);
+      const c = await vaultService.getReadContract(provider);
 
       // Resolve connected account (wallet)
       let acc = "";
@@ -220,7 +219,7 @@ export default function AdminDash() {
     (async () => {
       if (!provider || !tokenSel) return;
       try {
-        const c = vaultService.getVaultContract(provider);
+        const c = await vaultService.getReadContract(provider);
         const allowed = await c.supportedToken(tokenSel);
         setTokenAllowed(Boolean(allowed));
       } catch {}
@@ -232,7 +231,7 @@ export default function AdminDash() {
     (async () => {
       if (!provider || !tokenSel || !ethers.isAddress(tokenSel)) { setFixedPrice(""); return; }
       try {
-        const c = vaultService.getVaultContract(provider);
+        const c = await vaultService.getReadContract(provider);
         const p = await c.fixedUsdPrice(tokenSel);
         const norm = ethers.formatUnits(p || 0n, 18);
         // Hide zeros for UX; user can type 0 to clear
@@ -259,9 +258,7 @@ export default function AdminDash() {
       const { signer } = await requireOwnerAndSigner();
       const parsed = Math.floor(Number(String(dailyLimit).replace(/,/g, ".")));
       if (!Number.isFinite(parsed) || parsed < 0) throw new Error("Invalid amount");
-      const tx = typeof vaultService.setDailyLimit === "function"
-        ? await vaultService.setDailyLimit(parsed, signer)
-        : await vaultService.getVaultContract(signer).setDailyLimit(parsed);
+      const tx = await vaultService.setDailyLimit(signer, parsed);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Daily limit updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setDailyLimit("");
@@ -276,9 +273,7 @@ export default function AdminDash() {
     setBusy((b) => ({ ...b, lock: true })); setNotice(null);
     try {
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setLocked === "function"
-        ? await vaultService.setLocked(!locked, signer)
-        : await vaultService.getVaultContract(signer).setLocked(!locked);
+      const tx = await vaultService.setLocked(signer, !locked);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Lock status updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setLocked((v) => !v);
@@ -295,9 +290,7 @@ export default function AdminDash() {
       const { signer } = await requireOwnerAndSigner();
       const parsed = BigInt(Math.floor(Number(String(roundId).replace(/,/g, ""))));
       if (parsed <= 0n) throw new Error("Invalid round id");
-      const tx = typeof vaultService.startNewRound === "function"
-        ? await vaultService.startNewRound(parsed, signer)
-        : await vaultService.getVaultContract(signer).startNewRound(parsed);
+      const tx = await vaultService.startNewRound(signer, parsed);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `New round scheduled. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setRoundId("");
@@ -314,9 +307,7 @@ export default function AdminDash() {
     try {
       if (!isAddr(devWallet)) throw new Error("Invalid dev wallet address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setDevWallet === "function"
-        ? await vaultService.setDevWallet(devWallet, signer)
-        : await vaultService.getVaultContract(signer).setDevWallet(devWallet);
+      const tx = await vaultService.setDevWallet(signer, devWallet);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Dev wallet updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -331,9 +322,7 @@ export default function AdminDash() {
     try {
       if (!isAddr(rmcWallet)) throw new Error("Invalid RMC wallet address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setRmcWallet === "function"
-        ? await vaultService.setRmcWallet(rmcWallet, signer)
-        : await vaultService.getVaultContract(signer).setRmcWallet(rmcWallet);
+      const tx = await vaultService.setRmcWallet(signer, rmcWallet);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `RMC wallet updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -348,9 +337,7 @@ export default function AdminDash() {
     try {
       if (!isAddr(oracleAddr)) throw new Error("Invalid oracle address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setOracle === "function"
-        ? await vaultService.setOracle(oracleAddr, signer)
-        : await vaultService.getVaultContract(signer).setOracle(oracleAddr);
+      const tx = await vaultService.setOracle(signer, oracleAddr);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Oracle updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -365,9 +352,7 @@ export default function AdminDash() {
     try {
       if (!isBytes32(merkleRoot)) throw new Error("Invalid merkle root (bytes32 hex)");
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setMerkleRoot === "function"
-        ? await vaultService.setMerkleRoot(merkleRoot, signer)
-        : await vaultService.getVaultContract(signer).setMerkleRoot(merkleRoot);
+      const tx = await vaultService.setMerkleRoot(signer, merkleRoot);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Merkle root updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -376,22 +361,18 @@ export default function AdminDash() {
       setNotice({ type: "error", msg: err?.message || "Failed to set merkle root" });
     } finally { setBusy((b) => ({ ...b, merkle: false })); }
   }, [merkleRoot, requireOwnerAndSigner, loadBasics]);
+
   const onTransferOwnership = useCallback(async () => {
     setBusy((b) => ({ ...b, ownerXfer: true })); setNotice(null);
     try {
       if (!isAddr(newOwner)) throw new Error("Invalid new owner address");
       if (toLower(newOwner) === toLower(ethers.ZeroAddress)) throw new Error("New owner cannot be zero address");
       const { signer } = await requireOwnerAndSigner();
-      const c = vaultService.getVaultContract(signer);
-      const curOwner = await c.owner();
-      const signerAddr = await signer.getAddress();
-      if (toLower(signerAddr) !== toLower(curOwner)) throw new Error("Only the current owner can transfer ownership");
-      if (toLower(newOwner) === toLower(curOwner)) throw new Error("New owner must be different from current owner");
-      const tx = typeof vaultService.transferOwnership === "function"
-        ? await vaultService.transferOwnership(newOwner, signer)
-        : await c.transferOwnership(newOwner);
-      const rc = await waitReceipt(tx, signer);
-      setNotice({ type: "success", msg: `Ownership transferred. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
+      const rc = await (async () => {
+        const tx = await vaultService.transferOwnership(signer, newOwner);
+        return await waitReceipt(tx, signer);
+      })();
+      setNotice({ type: "success", msg: `Ownership transferred. Tx: ${txHashOf(rc)}` });
       setNewOwner("");
       await loadBasics();
     } catch (err) {
@@ -406,9 +387,7 @@ export default function AdminDash() {
       const target = tokenInput || tokenSel;
       if (!isAddr(target)) throw new Error("Invalid token address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setSupportedToken === "function"
-        ? await vaultService.setSupportedToken(target, tokenAllowed, signer)
-        : await vaultService.getVaultContract(signer).setSupportedToken(target, tokenAllowed);
+      const tx = await vaultService.setSupportedToken(signer, target, tokenAllowed);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Supported token updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setTokenInput("");
@@ -429,9 +408,7 @@ export default function AdminDash() {
       if (valStr === "") throw new Error("Enter a price (use 0 to clear)");
       const price18 = ethers.parseUnits(valStr, 18);
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setFixedUsdPrice === "function"
-        ? await vaultService.setFixedUsdPrice(target, price18, signer)
-        : await vaultService.getVaultContract(signer).setFixedUsdPrice(target, price18);
+      const tx = await vaultService.setFixedUsdPrice(signer, target, price18);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Fixed USD price updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -456,9 +433,7 @@ export default function AdminDash() {
       });
       if (bps.length !== th.length + 1) throw new Error("BPS must be thresholds.length + 1");
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.setFeeTiers === "function"
-        ? await vaultService.setFeeTiers(th, bps, signer)
-        : await vaultService.getVaultContract(signer).setFeeTiers(th, bps);
+      const tx = await vaultService.setFeeTiers(signer, th, bps);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Fee tiers updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -475,9 +450,7 @@ export default function AdminDash() {
       if (!isAddr(token)) throw new Error("Select a token");
       if (toLower(token) !== toLower(wone) && toLower(token) !== toLower(usdc)) throw new Error("Token not allowed");
       const { signer } = await requireOwnerAndSigner();
-      const tx = typeof vaultService.withdrawFunds === "function"
-        ? await vaultService.withdrawFunds(token, signer)
-        : await vaultService.getVaultContract(signer).withdrawFunds(token);
+      const tx = await vaultService.withdrawFunds(signer, token);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Withdraw submitted. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -616,7 +589,9 @@ export default function AdminDash() {
                 <button type="button" className={styles.button} onClick={onSetMerkleRoot} disabled={!isOwner || busy.merkle}>{busy.merkle ? "Updating…" : "Set Merkle Root"}</button>
               </div>
             </Section>
-          </section>          {/* Transfer Ownership */}
+          </section>
+
+          {/* Transfer Ownership */}
           <section className={cls(styles.grid1, styles.gridInner)}>
             <Section title="Transfer Ownership">
               <div className={styles.field}>

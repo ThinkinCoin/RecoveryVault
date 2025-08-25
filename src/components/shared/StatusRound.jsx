@@ -3,24 +3,6 @@ import { ethers } from "ethers";
 import styles from "@/styles/Global.module.css";
 import * as vaultService from "@/services/vaultService";
 
-/**
- * StatusRound.jsx (refactor to use vaultService)
- * -------------------------------------------------------------
- * Keeps the original legacy structure and styles (contractFunds*),
- * but replaces on-chain reads with vaultService helpers.
- *
- * Expected Vite envs:
- * - VITE_RPC_URL
- * - VITE_VAULT_ADDRESS
- * - VITE_ROUND_LOOKBACK_BLOCKS (no longer used here, kept for compatibility)
- *
- * Contract API via vaultService (ethers v6):
- * - getRoundInfo(provider)              // returns struct/tuple with round metadata
- * - isLocked(provider)                  // returns bool
- * - getVaultContract(provider).paused() // (try/catch) optional if Pausable
- * -------------------------------------------------------------
- */
-
 function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
@@ -34,7 +16,6 @@ function formatDate(tsSeconds) {
   } catch { return "—"; }
 }
 
-// Safe number extraction from possible struct/tuple
 function toNum(v, d = 0) {
   try {
     if (typeof v === "bigint") return Number(v);
@@ -44,116 +25,101 @@ function toNum(v, d = 0) {
   return d;
 }
 
-function firstNum(obj, keys, d = 0) {
-  for (const k of keys) {
-    if (obj && Object.prototype.hasOwnProperty.call(obj, k)) {
-      const n = toNum(obj[k], undefined);
-      if (Number.isFinite(n)) return n;
-    }
-  }
-  return d;
-}
-
 export default function StatusRound() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [currentRound, setCurrentRound] = useState(0);
   const [roundId, setRoundId] = useState(0);
-  const [startTime, setStartTime] = useState(0); // seconds
+  const [startTime, setStartTime] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [timeLeftSec, setTimeLeftSec] = useState(0);
 
-  const [statusLabel, setStatusLabel] = useState("Stopped / Finished");
+  const [statusLabel, setStatusLabel] = useState("Inactive");
   const [statusClass, setStatusClass] = useState("statusStopped");
-  const [lastUpdated, setLastUpdated] = useState(null);
 
   const RPC_URL = import.meta.env.VITE_RPC_URL;
   const provider = useMemo(() => {
     try {
-      if (!RPC_URL) return null;
-      return new ethers.JsonRpcProvider(RPC_URL);
+      return vaultService.getDefaultProvider?.() || (RPC_URL ? new ethers.JsonRpcProvider(RPC_URL) : null);
     } catch (err) {
       console.error("[StatusRound] Provider init error:", err);
       return null;
     }
   }, [RPC_URL]);
 
-  const intervalRef = useRef(null);
+  // --- Local countdown (no chain calls) ---
+  const countdownRef = useRef(null);
+  const startCountdown = useCallback((targetEpochSec) => {
+    if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+    if (!targetEpochSec) { setTimeLeftSec(0); return; }
+    const tick = () => {
+      const now = Math.floor(Date.now() / 1000);
+      const left = Math.max(0, targetEpochSec - now);
+      setTimeLeftSec(left);
+      if (left === 0 && countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+    };
+    tick();
+    countdownRef.current = setInterval(tick, 1000);
+  }, []);
 
-  const computeStatus = useCallback((paused, locked, hasRound) => {
-    if (paused) {
-      return { label: "Paused", cls: "statusPaused" };
-    }
-    if (locked) {
-      return { label: "On Delay Time", cls: "statusDelay" };
-    }
-    if (hasRound) {
-      return { label: "Open", cls: "statusOpen" };
-    }
-    return { label: "Stopped / Finished", cls: "statusStopped" };
+  const formatDuration = useCallback((secs) => {
+    const s = Math.max(0, Math.floor(secs || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(h)}:${pad(m)}:${pad(sec)}`;
+  }, []);
+
+  // Status per especificação:
+  // - Paused: info.paused === true
+  // - Locked: isLocked() === true
+  // - On Hold: now < startTime (ROUND_DELAY em curso)
+  // - Active: now >= startTime && !paused && !locked && hasFunds
+  // - Inactive: sem fundos após startTime (e não locked/paused)
+  const computeStatus = useCallback(({ paused, locked, start, hasFunds }) => {
+    const now = Math.floor(Date.now() / 1000);
+    if (paused) return { label: "Paused", cls: "statusPaused" };
+    if (locked) return { label: "Locked", cls: "statusPaused" };
+    if (start && now < start) return { label: "On Hold", cls: "statusDelay" };
+    if (hasFunds) return { label: "Active", cls: "statusOpen" };
+    return { label: "Inactive", cls: "statusStopped" };
   }, []);
 
   const fetchState = useCallback(async () => {
     if (!provider) throw new Error("Provider not ready");
 
-    // 1) Round info via vaultService (structure may vary by contract build)
-    let info = null;
-    try {
-      info = await vaultService.getRoundInfo(provider);
-    } catch (e) {
-      console.error("[StatusRound] getRoundInfo() failed", e);
-    }
+    // getRoundInfo: startTime já é o roundStart (após aplicar ROUND_DELAY no startNewRound)
+    // também retorna paused e isActive, mas seguiremos a regra explícita acima.
+    const [info, balances, locked] = await Promise.all([
+      vaultService.getRoundInfo(provider).catch(() => null),
+      vaultService.getVaultBalances(provider).catch(() => ({ woneBalance: 0n, usdcBalance: 0n })),
+      vaultService.isLocked(provider).catch(() => false),
+    ]);
 
-    // Extract roundId / currentRound / startTime from struct or tuple
-    // Common keys tried: roundId, currentRound, id, startTime, redeemStartsAt
-    let rid = 0;
-    let cr = 0;
-    let st = 0;
+    const rid = toNum(info?.roundId, 0);
+    const st = toNum(info?.startTime, 0);
+    const paused = Boolean(info?.paused);
 
-    if (info && typeof info === "object") {
-      rid = firstNum(info, ["roundId", "currentRound", "id", "round", 0], 0);
-      cr  = firstNum(info, ["currentRound", "roundId", "id", "round", 0], rid);
-      st  = firstNum(info, ["redeemStartsAt", "startTime", 1], 0);
+    // hasFunds baseado no cofre (não exibimos os valores neste card)
+    const w = balances?.woneBalance ?? 0n;
+    const u = balances?.usdcBalance ?? 0n;
+    const hasFunds = (w > 0n) || (u > 0n);
 
-      // Tuples (arrays) fallback
-      if (Array.isArray(info)) {
-        // Typically [roundId, startTime, ...]
-        rid = toNum(info[0], rid);
-        st  = toNum(info[1], st);
-      }
-    }
-
-    // 2) Locked flag
-    let locked = false;
-    try {
-      locked = Boolean(await vaultService.isLocked(provider));
-    } catch (e) {
-      console.error("[StatusRound] isLocked() failed", e);
-    }
-
-    // 3) Paused flag (optional)
-    let paused = false;
-    try {
-      const c = vaultService.getVaultContract(provider);
-      if (c && typeof c.paused === "function") {
-        paused = Boolean(await c.paused());
-      }
-    } catch (e) {
-      // If not Pausable, ignore
-    }
-
-    const derived = computeStatus(paused, locked, (rid ?? 0) > 0 || (cr ?? 0) > 0);
-
-    setCurrentRound(cr || rid || 0);
-    setRoundId(rid || cr || 0);
-    setStartTime(st || 0);
-    setIsLocked(locked);
+    setRoundId(rid);
+    setStartTime(st);
+    setIsLocked(Boolean(locked));
     setIsPaused(paused);
+
+    // Countdown até startTime
+    const now = Math.floor(Date.now() / 1000);
+    if (st && now < st) startCountdown(st); else setTimeLeftSec(0);
+
+    const derived = computeStatus({ paused, locked, start: st, hasFunds });
     setStatusLabel(derived.label);
     setStatusClass(derived.cls);
-    setLastUpdated(new Date());
-  }, [computeStatus, provider]);
+  }, [provider, computeStatus, startCountdown]);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
@@ -170,8 +136,8 @@ export default function StatusRound() {
 
   useEffect(() => {
     refresh();
-    intervalRef.current = setInterval(refresh, 60_000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    const interval = setInterval(refresh, 600_000);
+    return () => { clearInterval(interval); if (countdownRef.current) clearInterval(countdownRef.current); };
   }, [refresh]);
 
   return (
@@ -202,8 +168,8 @@ export default function StatusRound() {
           </div>
 
           <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsSubLabel}>Current Round</span>
-            <span className={styles.contractFundsSubValue}>{Number.isFinite(Number(currentRound)) ? Number(currentRound).toLocaleString() : "—"}</span>
+            <span className={styles.contractFundsSubLabel}>Round ID</span>
+            <span className={styles.contractFundsSubValue}>{Number.isFinite(Number(roundId)) ? Number(roundId).toLocaleString() : "—"}</span>
           </div>
 
           <div className={styles.contractFundsRow}>
@@ -215,13 +181,16 @@ export default function StatusRound() {
             <span className={styles.contractFundsSubLabel}>Paused</span>
             <span className={styles.contractFundsSubValue}>{isPaused ? "Yes" : "No"}</span>
           </div>
-{/*
-          <div className={styles.contractFundsFooter}>
-            <span className={styles.contractFundsTimestamp}>
-              {lastUpdated ? `Last updated: ${lastUpdated.toLocaleString()}` : ""}
-            </span>
-          </div>
-*/}
+
+          {timeLeftSec > 0 && (
+            <>
+              <div className={styles.contractFundsSep} />
+              <div className={styles.contractFundsRow}>
+                <span className={styles.contractFundsSubLabel}>Round Delay</span>
+                <span className={styles.contractFundsSubValue}>{formatDuration(timeLeftSec)}</span>
+              </div>
+            </>
+          )}
         </>
       )}
     </div>

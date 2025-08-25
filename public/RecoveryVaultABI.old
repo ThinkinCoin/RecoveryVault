@@ -1,0 +1,544 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [
+      { "internalType": "address", "name": "_owner", "type": "address" },
+      { "internalType": "address", "name": "_devWallet", "type": "address" },
+      { "internalType": "address", "name": "_rmcWallet", "type": "address" },
+      { "internalType": "address", "name": "_wone", "type": "address" },
+      { "internalType": "address", "name": "_usdc", "type": "address" },
+      {
+        "internalType": "address[]",
+        "name": "_supportedTokens",
+        "type": "address[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_dailyLimitUsd",
+        "type": "uint256"
+      },
+      { "internalType": "address", "name": "_oracle", "type": "address" }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "BurnToken",
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "tokenIn",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountIn",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "refundToken",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountOut",
+        "type": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NewRoundStarted",
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "roundId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "woneBalance",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "usdcBalance",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "startTime",
+        "type": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RedeemProcessed",
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "user",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "tokenIn",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountIn",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amountOut",
+        "type": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "VaultPaused",
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "isPaused",
+        "type": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SupportedTokenUpdated",
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "allowed",
+        "type": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeTiersUpdated",
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256[]",
+        "name": "thresholds",
+        "type": "uint256[]"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint16[]",
+        "name": "bps",
+        "type": "uint16[]"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "ROUND_DELAY",
+    "inputs": [],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "WALLET_RESET_INTERVAL",
+    "inputs": [],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "wONE",
+    "inputs": [],
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "usdc",
+    "inputs": [],
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "devWallet",
+    "inputs": [],
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "rmcWallet",
+    "inputs": [],
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "merkleRoot",
+    "inputs": [],
+    "outputs": [{ "internalType": "bytes32", "name": "", "type": "bytes32" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "currentRound",
+    "inputs": [],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "roundStart",
+    "inputs": [],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "dailyLimitUsd",
+    "inputs": [],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "isLocked",
+    "inputs": [],
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "oracle",
+    "inputs": [],
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "payable",
+    "name": "redeem",
+    "inputs": [
+      { "internalType": "address", "name": "tokenIn", "type": "address" },
+      { "internalType": "uint256", "name": "amountIn", "type": "uint256" },
+      { "internalType": "address", "name": "redeemIn", "type": "address" },
+      { "internalType": "bytes32[]", "name": "proof", "type": "bytes32[]" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "getLastRedeemTimestamp",
+    "inputs": [
+      { "internalType": "address", "name": "user", "type": "address" }
+    ],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "quoteRedeem",
+    "inputs": [
+      { "internalType": "address", "name": "user", "type": "address" },
+      { "internalType": "address", "name": "tokenIn", "type": "address" },
+      { "internalType": "uint256", "name": "amountIn", "type": "uint256" },
+      { "internalType": "address", "name": "redeemIn", "type": "address" },
+      { "internalType": "bytes32[]", "name": "proof", "type": "bytes32[]" }
+    ],
+    "outputs": [
+      { "internalType": "bool", "name": "whitelisted", "type": "bool" },
+      { "internalType": "bool", "name": "roundIsActive", "type": "bool" },
+      { "internalType": "uint256", "name": "feeAmount", "type": "uint256" },
+      { "internalType": "uint256", "name": "refundAmount", "type": "uint256" },
+      {
+        "internalType": "uint256",
+        "name": "userLimitUsdBefore",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "userLimitUsdAfter",
+        "type": "uint256"
+      },
+      { "internalType": "uint256", "name": "usdValue", "type": "uint256" },
+      { "internalType": "uint8", "name": "tokenInDecimals", "type": "uint8" },
+      { "internalType": "uint8", "name": "redeemInDecimals", "type": "uint8" },
+      { "internalType": "uint256", "name": "oraclePrice", "type": "uint256" },
+      { "internalType": "uint8", "name": "oracleDecimals", "type": "uint8" }
+    ]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "getUserLimit",
+    "inputs": [
+      { "internalType": "address", "name": "wallet", "type": "address" }
+    ],
+    "outputs": [
+      { "internalType": "uint256", "name": "remainingUSD", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "getVaultBalances",
+    "inputs": [],
+    "outputs": [
+      { "internalType": "uint256", "name": "woneBalance", "type": "uint256" },
+      { "internalType": "uint256", "name": "usdcBalance", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "getRoundInfo",
+    "inputs": [],
+    "outputs": [
+      { "internalType": "uint256", "name": "roundId", "type": "uint256" },
+      { "internalType": "uint256", "name": "startTime", "type": "uint256" },
+      { "internalType": "bool", "name": "isActive", "type": "bool" },
+      { "internalType": "bool", "name": "paused", "type": "bool" },
+      { "internalType": "uint256", "name": "limitUsd", "type": "uint256" }
+    ]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "getSupportedTokens",
+    "inputs": [],
+    "outputs": [
+      { "internalType": "address[]", "name": "", "type": "address[]" }
+    ]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "getFeeTiers",
+    "inputs": [],
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "thresholds",
+        "type": "uint256[]"
+      },
+      { "internalType": "uint16[]", "name": "bpsOut", "type": "uint16[]" }
+    ]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "supportedToken",
+    "inputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "supportedTokenList",
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "feeThresholds",
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "feeBps",
+    "inputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "outputs": [{ "internalType": "uint16", "name": "", "type": "uint16" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "redeemedInRound",
+    "inputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" },
+      { "internalType": "address", "name": "", "type": "address" }
+    ],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "lastRedeemTimestamp",
+    "inputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "fixedUsdPrice",
+    "inputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }]
+  },
+
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setMerkleRoot",
+    "inputs": [
+      { "internalType": "bytes32", "name": "_root", "type": "bytes32" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setSupportedToken",
+    "inputs": [
+      { "internalType": "address", "name": "token", "type": "address" },
+      { "internalType": "bool", "name": "allowed", "type": "bool" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setLocked",
+    "inputs": [{ "internalType": "bool", "name": "_status", "type": "bool" }],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setDailyLimit",
+    "inputs": [
+      { "internalType": "uint256", "name": "usdAmount", "type": "uint256" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setOracle",
+    "inputs": [
+      { "internalType": "address", "name": "_oracle", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setDevWallet",
+    "inputs": [
+      { "internalType": "address", "name": "wallet", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setRmcWallet",
+    "inputs": [
+      { "internalType": "address", "name": "wallet", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setFeeTiers",
+    "inputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "thresholds",
+        "type": "uint256[]"
+      },
+      { "internalType": "uint16[]", "name": "bps", "type": "uint16[]" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "setFixedUsdPrice",
+    "inputs": [
+      { "internalType": "address", "name": "token", "type": "address" },
+      { "internalType": "uint256", "name": "usdPrice18", "type": "uint256" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "withdrawFunds",
+    "inputs": [
+      { "internalType": "address", "name": "token", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "startNewRound",
+    "inputs": [
+      { "internalType": "uint256", "name": "_roundId", "type": "uint256" }
+    ],
+    "outputs": []
+  },
+
+  {
+    "type": "function",
+    "stateMutability": "view",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }]
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "transferOwnership",
+    "inputs": [
+      { "internalType": "address", "name": "newOwner", "type": "address" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "stateMutability": "nonpayable",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": []
+  }
+]
