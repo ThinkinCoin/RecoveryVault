@@ -95,13 +95,15 @@ export default function Footer() {
         <div className={styles.credits}>
           <div className={styles.copyright}>
             © {new Date().getFullYear()} {" "}
-              <a href="https://t.me/thinkincoin" target="_blank" rel="noopener noreferrer" className={`${styles.textsm} hover:underline`}>Built by Think in Coin</a>
+              <a href="https://t.me/thinkincoin" target="_blank" rel="noopener noreferrer" className={`${styles.textsm} hover:underline`}>| Built by Think in Coin |</a>
           </div>
           <div className={`${styles.socialIcons} `}>
+{/*             
             <a href="https://instagram.com/thinkincoin" target="_blank" rel="noopener noreferrer"><FaInstagram /></a>
             <a href="https://youtube.com/@thinkincoin" target="_blank" rel="noopener noreferrer"><FaYoutube /></a>
             <a href="https://twitter.com/thinkincoin" target="_blank" rel="noopener noreferrer"><FaTwitter /></a>
-            <a href="https://github.com/thinkincoin" target="_blank" rel="noopener noreferrer"><FaGithub /></a>
+*/}
+            <a href="https://github.com/thinkincoin/recoveryvault" target="_blank" rel="noopener noreferrer"><FaGithub size={12} /></a>
         </div>
        </div>
 
