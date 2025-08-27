@@ -33,7 +33,8 @@ module.exports = {
       hardhat: {},
       harmony: {
         url: process.env.VITE_RPC_URL || '',
-        accounts: privateKey ? [`0x${privateKey}`] : []
+        accounts: privateKey ? [`0x${privateKey}`] : [],
+        gasPrice: 1_000_000_000, // 1
       }
     },
 

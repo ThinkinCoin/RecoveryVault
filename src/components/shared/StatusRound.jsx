@@ -82,7 +82,7 @@ export default function StatusRound() {
     const now = Math.floor(Date.now() / 1000);
     if (paused) return { label: "Paused", cls: "statusPaused" };
     if (locked) return { label: "Locked", cls: "statusPaused" };
-    if (start && now < start) return { label: "On Hold", cls: "statusDelay" };
+    if (start && now < start) return { label: "On Hold", cls: "statusHold" };
     if (hasFunds) return { label: "Active", cls: "statusOpen" };
     return { label: "Inactive", cls: "statusStopped" };
   }, []);
@@ -141,53 +141,53 @@ export default function StatusRound() {
   }, [refresh]);
 
   return (
-    <div className={styles.contractFundsCard}>
-      <div className={styles.contractFundsHeader}>
-        <span className={styles.contractFundsTitle}>Round Status</span>
-        <button type="button" className={styles.contractFundsRefreshBtn} onClick={refresh} disabled={isLoading}>
+    <div className={styles.contractStatusCard}>
+      <div className={styles.contractStatusHeader}>
+        <span className={styles.contractStatusTitle}>Round Status</span>
+        <button type="button" className={styles.contractStatusRefreshBtn} onClick={refresh} disabled={isLoading}>
           {isLoading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 
       {error ? (
-        <div className={styles.contractFundsErrorBox} role="alert">
+        <div className={styles.contractStatusErrorBox} role="alert">
           <strong>Failed to load:</strong> {error}
         </div>
       ) : (
         <>
-          <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsLabel}>Status</span>
-            <span className={cx(styles.contractFundsPill, styles[statusClass])}>{statusLabel}</span>
+          <div className={styles.contractStatusRow}>
+            <span className={styles.contractStatusLabel}>Status</span>
+            <span className={cx(styles.contractStatusPill, styles[statusClass])}>{statusLabel}</span>
           </div>
 
-          <div className={styles.contractFundsSep} />
+          <div className={styles.contractStatusSep} />
 
-          <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsSubLabel}>Start Time</span>
-            <span className={styles.contractFundsSubValue}>{formatDate(startTime)}</span>
+          <div className={styles.contractStatusRow}>
+            <span className={styles.contractStatusSubLabel}>Start Time</span>
+            <span className={styles.contractStatusSubValue}>{formatDate(startTime)}</span>
           </div>
 
-          <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsSubLabel}>Round ID</span>
-            <span className={styles.contractFundsSubValue}>{Number.isFinite(Number(roundId)) ? Number(roundId).toLocaleString() : "—"}</span>
+          <div className={styles.contractStatusRow}>
+            <span className={styles.contractStatusSubLabel}>Round ID</span>
+            <span className={styles.contractStatusSubValue}>{Number.isFinite(Number(roundId)) ? Number(roundId).toLocaleString() : "—"}</span>
           </div>
 
-          <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsSubLabel}>Locked</span>
-            <span className={styles.contractFundsSubValue}>{isLocked ? "Yes" : "No"}</span>
+          <div className={styles.contractStatusRow}>
+            <span className={styles.contractStatusSubLabel}>Locked</span>
+            <span className={styles.contractStatusSubValue}>{isLocked ? "Yes" : "No"}</span>
           </div>
 
-          <div className={styles.contractFundsRow}>
-            <span className={styles.contractFundsSubLabel}>Paused</span>
-            <span className={styles.contractFundsSubValue}>{isPaused ? "Yes" : "No"}</span>
+          <div className={styles.contractStatusRow}>
+            <span className={styles.contractStatusSubLabel}>Paused</span>
+            <span className={styles.contractStatusSubValue}>{isPaused ? "Yes" : "No"}</span>
           </div>
 
           {timeLeftSec > 0 && (
             <>
-              <div className={styles.contractFundsSep} />
-              <div className={styles.contractFundsRow}>
-                <span className={styles.contractFundsSubLabel}>Round Delay</span>
-                <span className={styles.contractFundsSubValue}>{formatDuration(timeLeftSec)}</span>
+              <div className={styles.contractStatusSep} />
+              <div className={styles.contractStatusRow}>
+                <span className={styles.contractStatusSubLabel}>Round starts in: </span>
+                <span className={styles.contractStatusSubValue}>{formatDuration(timeLeftSec)}</span>
               </div>
             </>
           )}

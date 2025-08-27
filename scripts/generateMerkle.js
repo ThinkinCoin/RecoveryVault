@@ -1,48 +1,43 @@
 const fs = require('fs');
 const path = require('path');
 const { MerkleTree } = require('merkletreejs');
-const keccak256 = require('keccak256');
+const keccak256 = require('keccak256'); // pacote
+// Se preferir ethers v6, veja Opção 2 acima
 
-// Caminho do arquivo da lista
-const listPath = path.join(__dirname, '..', 'public', 'data', 'prehack_list.txt');
-const rootOutput = path.join(__dirname, '..', 'public', 'data', 'merkleRoot.json');
-const proofOutput = path.join(__dirname, '..', 'public', 'data', 'proofs.json');
+const listPath   = path.join(__dirname, '..', 'public', 'data', 'prehack_list.txt');
+const proofsPath = path.join(__dirname, '..', 'public', 'data', 'proofs.json');
 
-// Leitura da lista
-const addresses = fs
-  .readFileSync(listPath, 'utf-8')
+const raw = fs.readFileSync(listPath, 'utf-8')
   .split('\n')
-  .map(addr => addr.trim().toLowerCase())
+  .map(s => s.trim())
   .filter(Boolean);
 
-// Geração dos leaves
-const leaves = addresses.map(addr => keccak256(addr));
+// normaliza, remove duplicatas e comentários
+const addresses = Array.from(new Set(
+  raw.filter(line => !line.startsWith('#')).map(a => a.toLowerCase())
+));
 
-// Criação da árvore
+function leafFromAddress(addr) {
+  const hex = addr.replace(/^0x/, '');
+  return keccak256(Buffer.from(hex, 'hex')); // == keccak256(abi.encodePacked(address))
+}
+
+const leaves = addresses.map(leafFromAddress);
 const tree = new MerkleTree(leaves, keccak256, { sortPairs: true });
-
-// Geração do root
 const root = tree.getHexRoot();
 
-// Salvar o root
-fs.writeFileSync(rootOutput, JSON.stringify({ merkleRoot: root }, null, 2));
-console.log('✅ Merkle root saved to merkleRoot.json');
-
-// Gerar proofs para cada endereço
-const allProofs = {};
-addresses.forEach(addr => {
-  const proof = tree.getHexProof(keccak256(addr));
-  allProofs[addr] = proof;
-});
-
-// Salvar os proofs
-fs.writeFileSync(proofOutput, JSON.stringify(allProofs, null, 2));
-console.log('✅ Proofs saved to proofs.json');
-
-// CLI opcional
-if (process.argv[2]) {
-  const query = process.argv[2].toLowerCase();
-  const proof = tree.getHexProof(keccak256(query));
-  console.log(`\n🔍 Proof for ${query}:`);
-  console.log(JSON.stringify(proof, null, 2));
+const proofsObj = {};
+for (const addr of addresses) {
+  const proof = tree.getHexProof(leafFromAddress(addr));
+  proofsObj[addr] = proof;
 }
+
+const out = {
+  merkleRoot: root,
+  format: "keccak256(abi.encodePacked(address))",
+  treeOptions: { sortPairs: true },
+  proofs: proofsObj,
+};
+
+fs.writeFileSync(proofsPath, JSON.stringify(out, null, 2));
+console.log('✅ proofs.json salvo com merkleRoot e proofs.');

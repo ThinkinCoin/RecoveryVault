@@ -200,40 +200,40 @@ export default function LimitChecker({ address }) {
     };
   }, [compute, setupCountdown]);
 
-  return (
-    <div className={s.contractFundsCardInner}>
-      <div className={s.contractFundsHeader}>
-        <span className={s.contractFundsTitle}>Daily Limit</span>
-        <button type="button" className={s.contractFundsRefreshBtn} onClick={compute} disabled={isLoading}>
+  return (    
+    <div className={`${s.contractLimitsCardInner} ${s.panel}`}>
+      <div className={s.contractLimitsHeader}>
+        <span className={s.contractLimitsTitle}>Daily Limit</span>
+        <button type="button" className={s.contractLimitsRefreshBtn} onClick={compute} disabled={isLoading}>
           {isLoading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 
       {error ? (
-        <div className={s.contractFundsErrorBox} role="alert">
+        <div className={s.contractLimitsErrorBox} role="alert">
           <strong>Failed to load:</strong> {error}
         </div>
       ) : (
         <>
-          <div className={s.contractFundsSep} />
+          <div className={s.contractLimitsSep} />
 
-          <div className={s.contractFundsRow}>
-            <span className={s.contractFundsLabel}>Limit Used</span>
-            <span className={s.contractFundsValue} data-testid="limit-used">{formatUSD(usedUsd)}</span>
+          <div className={s.contractLimitsRow}>
+            <span className={s.contractLimitsLabel}>Limit Used</span>
+            <span className={s.contractLimitsValue} data-testid="limit-used">{formatUSD(usedUsd)}</span>
           </div>
 
-          <div className={s.contractFundsRow}>
-            <span className={s.contractFundsLabel}>Daily Limit</span>
-            <span className={s.contractFundsValue} data-testid="daily-limit">{formatUSD(limitUsd)}</span>
+          <div className={s.contractLimitsRow}>
+            <span className={s.contractLimitsLabel}>Daily Limit</span>
+            <span className={s.contractLimitsValue} data-testid="daily-limit">{formatUSD(limitUsd)}</span>
           </div>
 
-          <div className={s.contractFundsRow}>
-            <span className={s.contractFundsSubLabel}>Remaining</span>
-            <span className={s.contractFundsSubValue} data-testid="remaining-limit">{formatUSD(remainingUsd)}</span>
+          <div className={s.contractLimitsRow}>
+            <span className={s.contractLimitsSubLabel}>Remaining</span>
+            <span className={s.contractLimitsSubValue} data-testid="remaining-limit">{formatUSD(remainingUsd)}</span>
           </div>
 
-          <div className={s.contractFundsFooter}>
-            <span className={s.contractFundsTimestamp}>
+          <div className={s.contractLimitsFooter}>
+            <span className={s.contractLimitsTimestamp}>
               {timeLeftSec == null
                 ? "Next reset: —"
                 : timeLeftSec === 0

@@ -23,12 +23,17 @@
   --bp-md:960px;
   --bp-sm:768px;
   --bp-xs:420px;
-}
+  --box-info:#ded89733;
+  --box-error:#f2373733;
+  --box-success:#5befc233;
+  --box-check:#0db7e4;
+  --box-danger:#520101ce;
+  }
 
 /* ===== THEME: Light overrides ===== */
 :root[data-theme="light"], .light{
   --background:#ededed;
-  --foreground:#dbdbdb;
+  --foreground:#ffffff99;
   --text-primary:#0b1324;
   --text-secondary:#475569;
   --brand-b:#0db7e4;
@@ -62,7 +67,7 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 
 /* ===== Layout ===== */
 .page{ min-height:100vh; display:flex; flex-direction:column; background:var(--background); background-image: var(--bkg-gradient); color:var(--text-primary); }
-.containerWide{ max-width:var(--container-max); width:100%; margin:0 auto; padding:var(--space-md); }
+.containerWide{ max-width:var(--container-max); width:100%; margin:0 auto; padding:var(--space-md);}
 .content{ flex:1; }
 
 .header{ border:none; }
@@ -82,7 +87,13 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 .statusLine{ margin-top:4px; font-size:12px; display:inline-flex; gap:8px; align-items:center; }
 .statusDot{ width:8px; height:8px; border-radius:50%; background:var(--secondary); display:inline-block; }
 .statusOpen{ background:var(--secondary); color:#222}
-.statusLocked{ background:#f97316; }
+.statusLocked{ background:#060606; color:var(--primary)}
+/* Status pills extras StatusRound */
+.statusHold { background:#f59e0b; color:var(--background); }        /* On Hold (delay) */
+.statusActive { background:#22c55e; color:var(--background); }   /* Active */
+.statusInactive { background:#94a3b8; color:var(--background); } /* Inactive (sem fundos) */
+.statusPaused { background:#ef4444; color:var(--background); }   /* Paused/Locked */
+
 
 /* ===== Grids & stacks ===== */
 .gridInner { padding: var(--space-md); }
@@ -147,24 +158,64 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
   .button{ padding:10px 12px; min-height:40px; }
   .buttonBlock{ width:100%; }
 
-  /* ContractFunds tweaks */
+  /* Contract Vault Funds tweaks */
   .contractFundsCard{ padding:var(--space-sm); gap:8px; }
   .contractFundsLabel{ font-size:13px; }
   .contractFundsValue{ font-size:16px; }
   .contractFundsRow{ gap:8px; }
-  .contractFundsSubValue{ word-break:break-all; }
+  .contractFundsSubValue{ font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: xx-small;}
+
+    /* Contract Limits tweaks */
+  .contractLimitsCard{ padding:var(--space-sm); gap:8px; }
+  .contractLimitsLabel{ font-size:13px; }
+  .contractLimitsValue{ font-size:16px; }
+  .contractLimitsRow{ gap:8px; }
+  .contractLimitsSubValue{ word-break:break-all; }
+
+    /* Contract Status tweaks */
+  .contractStatusCard{ padding:var(--space-sm); gap:8px; }
+  .contractStatusLabel{ font-size:13px; }
+  .contractStatusValue{ font-size:16px; }
+  .contractStatusRow{ gap:8px; }
+  .contractStatusSubValue{ word-break:break-all; }
+
+    /* Contract Redeem Form tweaks */
+  .contractRedeemCard{ padding:var(--space-sm); gap:8px; }
+  .contractRedeemLabel{ font-size:13px; }
+  .contractRedeemValue{ font-size:16px; }
+  .contractRedeemRow{ gap:8px; }
+  .contractRedeemSubValue{ word-break:break-all; }
 }
 
 @media (max-width: 420px){
-  .containerWide{ padding:10px; }
-  .grid1, .grid2, .grid3{ margin:0; }
+  .containerWide{ padding:10px 0; flex-direction: column-reverse; display: flex; }
+  .grid1, .grid2, .grid3, .card{ margin:2px 5px; max-width: 390px;}
   .logoImg{ height:48px; }
+
+  /* Contract Vault Funds */
   .contractFundsHeader{ flex-direction:column; align-items:flex-start; gap:8px; }
   .contractFundsRow{ flex-direction:column; align-items:flex-start; gap:4px; }
   .contractFundsTitle{ font-size:14px; }
+
+    /* Contract Limits */
+  .contractLimitsHeader{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .contractLimitsRow{ flex-direction:column; align-items:flex-start; gap:4px; }
+  .contractLimitsTitle{ font-size:14px; }
+
+    /* Contract Status */
+  .contractStatusHeader{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .contractStatusRow{ flex-direction:column; align-items:flex-start; gap:4px; }
+  .contractStatusTitle{ font-size:14px; }
+
+    /* Contract Redeem */
+  .contractRedeemHeader{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .contractRedeemRow{ flex-direction:column; align-items:flex-start; gap:4px; }
+  .contractRedeemTitle{ font-size:14px; }
+
   .button{ width:100%; }
   .ButtonIconClean{ padding:6px 8px; }
   .headerLeft {justify-items: center;}
+  
 }
 
 /* ===== Cards & text ===== */
@@ -204,7 +255,7 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 .button{
   display:inline-flex; align-items:center; justify-content:center; gap:6px;
   padding:8px 12px; border-radius:10px; cursor:pointer; user-select:none;
-  background:#111a2c; color:var(--text-primary); border:1px solid rgba(255,255,255,0.08);
+  background:var(--foreground); color:var(--text-primary); border:1px solid rgba(255,255,255,0.08);
   transition:background .15s ease, border-color .15s ease, transform .02s ease-in-out;
   touch-action:manipulation;
 }
@@ -214,15 +265,24 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 .button:active{ transform:translateY(1px); }
 .buttonBlock{ width:100%; }
 .buttonAccent{ background:var(--secondary); color:#0b1324; font-weight:700; border-color:var(--secondary); }
-.buttonWarn{ background:#b00000; color:#ededed; font-weight:700; border-color:#ffffff; }
+.buttonWarn{ background:var(--box-danger); color: var(--text-primary); font-weight: 500; border-color: var(--foreground); }
 .buttonActive{ background:var(--primary); border-color:var(--primary); color:#0b1324; }
+.selectorDropdown {
+  position: absolute;
+  position: absolute;
+  margin: 45px 0;
+  background: var(--background);
+  border-radius: 15px;
+  z-index: 1;
+  padding: 10px 25px;
+}
 
 /* ===== Alerts ===== */
 .alert{ border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:12px; }
-.info{ background:rgba(13,183,228,0.10); color:#bdeaff; }
-.success{ background:rgba(91,239,194,0.12); color:#d8ffef; }
-.warning{ background:rgba(255,193,7,0.12); color:#ffe6b3; }
-.error{ background:rgba(239,68,68,0.12); color:#ffd4d4; }
+.info{ background:var(--box-info); color:var(--background); }
+.success{ background:var(--box-success); color:var(--brand-b); }
+.warning{ background:var(--box-error); color:var(--gray-200); }
+.error{ background:var(--box-danger); color:var(--gray-200); }
 
 /* ===== Footer ===== */
 .footer{ display:flex; align-items:center; justify-content:center; gap:var(--space-sm); padding:var(--space-md); color:var(--text-secondary); text-align:center;    flex-direction: row-reverse; }
@@ -235,28 +295,114 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 /* ===== Recovery Vault: ContractFunds component styles ===== */
 .contractFundsCard{ background:var(--foreground); color:var(--text-primary); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius); padding:var(--space-md); display:flex; flex-direction:column; gap:12px; }
 .contractFundsCardInner{ color:var(--text-primary);  padding:var(--space-sm); display:flex; flex-direction:column; gap:8px; }
-.contractFundsHeader{ display:flex; justify-content:space-between; align-items:center; }
+.contractFundsHeader{ display:flex; flex-direction: row; justify-content:space-between; align-items:center; }
 .contractFundsTitle{ font-weight:700; font-size:16px; }
 .contractFundsRefreshBtn{ border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:transparent; padding:6px 10px; cursor:pointer; font-size:12px; color:var(--text-primary); }
 .contractFundsRefreshBtn:hover{ border-color:var(--primary); color:var(--primary); }
 
-.contractFundsRow{ display:flex; justify-content:space-between; gap:12px; }
+.contractFundsRow{ display:flex; flex-direction: row; justify-content:space-between; gap:12px; }
 .contractFundsLabel{ font-weight:600; font-size:14px; }
 .contractFundsValue{ font-weight:800; font-size:18px; }
 .contractFundsSubLabel{ opacity:0.9; }
-.contractFundsSubValue{ font-variant-numeric:tabular-nums; }
+.contractFundsSubValue{ font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: xx-small; }
 .contractFundsMuted{ opacity:0.7; margin-left:8px; }
 .contractFundsSep{ height:1px; background:rgba(255,255,255,0.08); margin:4px 0; }
 
 .contractFundsErrorBox{ border:1px solid #ff6b6b; background:rgba(255,107,107,0.1); color:#ff8a8a; border-radius:12px; padding:12px; font-size:13px; }
 
 .contractFundsFooter{ display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
-.contractFundsPill{ border:1px solid rgba(255,255,255,0.12); border-radius:999px; padding:2px 8px; font-size:12px; opacity:0.9; }
+.contractFundsPill {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  padding: 2px 5px; 
+  font-size: 12px;
+  opacity: 0.9;
+}
 .contractFundsTimestamp{ opacity:0.6; font-size:12px; }
+.contractFundsTier{     background: var(--foreground);color: var(--brand-b);} /* Tier Badge */
 
-/* Light theme tweaks */
+
+/* ===== Recovery Vault: Contract Limits component styles ===== */
+.contractLimitsCard{ background:var(--foreground); color:var(--text-primary); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius); padding:var(--space-md); display:flex; flex-direction:column; gap:12px; }
+.contractLimitsCardInner{ color:var(--text-primary);  padding:var(--space-sm); display:flex; flex-direction:column; gap:8px; }
+.contractLimitsHeader{ display:flex; flex-direction: row; justify-content:space-between; align-items:center; }
+.contractLimitsTitle{ font-weight:700; font-size:16px; }
+.contractLimitsRefreshBtn{ border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:transparent; padding:6px 10px; cursor:pointer; font-size:12px; color:var(--text-primary); }
+.contractLimitsRefreshBtn:hover{ border-color:var(--primary); color:var(--primary); }
+
+.contractLimitsRow{ display:flex; flex-direction: row; justify-content:space-between; gap:12px; }
+.contractLimitsLabel{ font-weight:600; font-size:14px; }
+.contractLimitsValue{ font-weight:800; font-size:18px; }
+.contractLimitsSubLabel{ opacity:0.9; }
+.contractLimitsSubValue{ font-variant-numeric:tabular-nums; }
+.contractLimitsMuted{ opacity:0.7; margin-left:8px; }
+.contractLimitsSep{ height:1px; background:rgba(255,255,255,0.08); margin:4px 0; }
+
+.contractLimitsErrorBox{ border:1px solid #ff6b6b; background:rgba(255,107,107,0.1); color:#ff8a8a; border-radius:12px; padding:12px; font-size:13px; }
+
+.contractLimitsFooter{ display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+.contractLimitsPill{ border:1px solid rgba(255,255,255,0.12); border-radius:999px; padding:2px 8px; font-size:12px; opacity:0.9; }
+.contractLimitsTimestamp{ opacity:0.6; font-size:12px; }
+
+/* ===== Recovery Vault: Contract Status component styles ===== */
+.contractStatusCard{ background:var(--foreground); color:var(--text-primary); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius); padding:var(--space-md); display:flex; flex-direction:column; gap:12px; }
+.contractStatusCardInner{ color:var(--text-primary);  padding:var(--space-sm); display:flex; flex-direction:column; gap:8px; }
+.contractStatusHeader{ display:flex; flex-direction: row; justify-content:space-between; align-items:center; }
+.contractStatusTitle{ font-weight:700; font-size:16px; }
+.contractStatusRefreshBtn{ border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:transparent; padding:6px 10px; cursor:pointer; font-size:12px; color:var(--text-primary); }
+.contractStatusRefreshBtn:hover{ border-color:var(--primary); color:var(--primary); }
+
+.contractStatusRow{ display:flex; flex-direction: row; justify-content:space-between; gap:12px; }
+.contractStatusLabel{ font-weight:600; font-size:14px; }
+.contractStatusValue{ font-weight:800; font-size:18px; }
+.contractStatusSubLabel{ opacity:0.9; }
+.contractStatusSubValue{ font-variant-numeric:tabular-nums; }
+.contractStatusMuted{ opacity:0.7; margin-left:8px; }
+.contractStatusSep{ height:1px; background:rgba(255,255,255,0.08); margin:4px 0; }
+
+.contractStatusErrorBox{ border:1px solid #ff6b6b; background:rgba(255,107,107,0.1); color:#ff8a8a; border-radius:12px; padding:12px; font-size:13px; }
+
+.contractStatusFooter{ display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+.contractStatusPill{ border:1px solid rgba(255,255,255,0.12); border-radius:999px; padding:2px 8px; font-size:12px; opacity:0.9; }
+.contractStatusTimestamp{ opacity:0.6; font-size:12px; }
+
+/* ===== Recovery Vault: Contract Redeem component styles ===== */
+.contractRedeemCard{ background:var(--foreground); color:var(--text-primary); border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius); padding:var(--space-md); display:flex; flex-direction:column; gap:12px; min-width: 400px; }
+.contractRedeemCardInner{ color:var(--text-primary);  padding:var(--space-sm); display:flex; flex-direction:column; gap:8px; }
+.contractRedeemHeader{ display:flex; flex-direction: row; justify-content:space-between; align-items:center; }
+.contractRedeemTitle{ font-weight:700; font-size:16px; }
+.contractRedeemRefreshBtn{ border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:transparent; padding:6px 10px; cursor:pointer; font-size:12px; color:var(--text-primary); }
+.contractRedeemRefreshBtn:hover{ border-color:var(--primary); color:var(--primary); }
+
+.contractRedeemRow{ display:flex; flex-direction: row; justify-content:space-between; gap:12px; }
+.contractRedeemLabel{ font-weight:600; font-size:14px; }
+.contractRedeemValue{ font-weight:800; font-size:18px; }
+.contractRedeemSubLabel{ opacity:0.9; }
+.contractRedeemSubValue{ font-variant-numeric:tabular-nums; }
+.contractRedeemMuted{ opacity:0.7; margin-left:8px; }
+.contractRedeemSep{ height:1px; background:rgba(255,255,255,0.08); margin:4px 0; }
+
+.contractRedeemErrorBox{ border:1px solid #ff6b6b; background:rgba(255,107,107,0.1); color:#ff8a8a; border-radius:12px; padding:12px; font-size:13px; }
+
+.contractRedeemFooter{ display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+.contractRedeemPill{ border:1px solid rgba(255,255,255,0.12); border-radius:999px; padding:2px 8px; font-size:12px; opacity:0.9; }
+.contractRedeemTimestamp{ opacity:0.6; font-size:12px; }
+
+/* Light theme Funds tweaks */
 :root[data-theme="light"] .contractFundsCard, .light .contractFundsCard{ border-color:rgba(0,0,0,0.06); }
 :root[data-theme="light"] .contractFundsRefreshBtn, .light .contractFundsRefreshBtn{ border-color:rgba(0,0,0,0.08); }
+
+/* Light theme Limits tweaks */
+:root[data-theme="light"] .contractLimitsCard, .light .contractLimitsCard{ border-color:rgba(0,0,0,0.06); }
+:root[data-theme="light"] .contractLimitsRefreshBtn, .light .contractLimitsRefreshBtn{ border-color:rgba(0,0,0,0.08); }
+
+/* Light theme Status tweaks */
+:root[data-theme="light"] .contractStatusCard, .light .contractStatusCard{ border-color:rgba(0,0,0,0.06); }
+:root[data-theme="light"] .contractStatusRefreshBtn, .light .contractStatusRefreshBtn{ border-color:rgba(0,0,0,0.08); }
+
+/* Light theme Redeem tweaks */
+:root[data-theme="light"] .contractRedeemCard, .light .contractRedeemCard{ border-color:rgba(0,0,0,0.06); }
+:root[data-theme="light"] .contractRedeemRefreshBtn, .light .contractRedeemRefreshBtn{ border-color:rgba(0,0,0,0.08); }
 
 /* Numeric helpers */
 .numericWrap{ overflow-wrap:anywhere; word-break:break-word; }

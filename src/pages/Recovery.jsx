@@ -144,16 +144,17 @@ export default function Recovery() {
         onToggleTheme={onToggleTheme}
       />
       <ContentFrame>
-        {/* wallet checker */}
-        <section className={styles.grid3}>
+        <section className={`${styles.grid3}`}>
           <WalletChecker address={userInfo.address || account} onResult={handleEligibility} proofsUrl={PROOFS_URL} />
           <ContractFunds />
           <StatusRound />
         </section>
 
         {/* ReddemForm */}
-        <section className={`${styles.grid2} `}>
+        <section className={`${styles.grid3} `}>
+          <div></div>
           <RedeemForm address={userInfo.address || account} eligible={eligible} proof={proof} />
+          <div></div>
         </section>
       </ContentFrame>
       <Footer className={styles.footer} />

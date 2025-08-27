@@ -103,7 +103,7 @@ export default function Footer() {
             <a href="https://youtube.com/@thinkincoin" target="_blank" rel="noopener noreferrer"><FaYoutube /></a>
             <a href="https://twitter.com/thinkincoin" target="_blank" rel="noopener noreferrer"><FaTwitter /></a>
 */}
-            <a href="https://github.com/thinkincoin/recoveryvault" target="_blank" rel="noopener noreferrer"><FaGithub size={12} /></a>
+            <a href="https://github.com/thinkincoin/revault-public" target="_blank" rel="noopener noreferrer"><FaGithub size={12} /></a>
         </div>
        </div>
 
@@ -114,7 +114,7 @@ export default function Footer() {
           aria-label={`Switch to ${nextTheme} theme`}
           title={`Switch to ${nextTheme} theme`}
           className={`${styles.ButtonIconClean}`}>
-          {isDark ? <FiSun size={16} /> : <FiMoon size={16} />}
+          {isDark ? <FiSun size={12} /> : <FiMoon size={12} />}
         </button>
       </div>
     </footer>

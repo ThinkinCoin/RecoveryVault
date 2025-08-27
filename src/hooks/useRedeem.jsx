@@ -1,6 +1,10 @@
 // @/hooks/useRedeem.js
 // Hook fino para orquestrar o fluxo de redeem usando o redeemService
 // Estados: idle → preparing → ready|blocked → approving → redeeming → success|error
+//
+// Extra: aceita um callback opcional `onAllowanceRefresh` em `execute(signer, { onAllowanceRefresh })`
+// que será chamado assim que todas as aprovações forem confirmadas — imediatamente antes do
+// estágio de `redeeming`. Use para integrar com `useTokenAllowance(...).refresh()` e atualizar a UI.
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
@@ -18,7 +22,7 @@ import * as redeemService from "@/services/redeemService";
  *   progress: string|null,
  *   receipts: { approvals: any[], redeem: any|null },
  *   prepare: (params: { user:string, tokenIn:string, amountHuman:string|number, redeemIn:string, proof?:string[] }) => Promise<any>,
- *   execute: (signer: ethers.Signer) => Promise<any>,
+ *   execute: (signer: ethers.Signer, opts?: { onAllowanceRefresh?: () => Promise<any> | any }) => Promise<any>,
  *   reset: () => void,
  *   canPrepare: boolean,
  *   canExecute: boolean,
@@ -82,7 +86,7 @@ export default function useRedeem(readProvider){
   }, [readProvider, setSafe]);
 
   // execute → executa plano (approve(s) → redeem)
-  const execute = useCallback(async (signer) => {
+  const execute = useCallback(async (signer, opts = {}) => {
     if (!plan) { setSafe(() => { setError("No plan to execute"); setState("error"); }); return null; }
     if (!plan.ok) { setSafe(() => { setError("Plan is blocked"); setState("blocked"); }); return null; }
     if (!signer) { setSafe(() => { setError("Signer required"); setState("error"); }); return null; }
@@ -93,6 +97,11 @@ export default function useRedeem(readProvider){
         if (stage === "approving") setState("approving");
         if (stage === "redeeming") setState("redeeming");
       });
+      // Chama refresh assim que entrarmos no estágio "redeeming",
+      // isto é, após aprovações confirmadas e imediatamente antes do redeem.
+      if (stage === "redeeming" && typeof opts.onAllowanceRefresh === "function"){
+        try { Promise.resolve(opts.onAllowanceRefresh()).catch(() => {}); } catch {}
+      }
     };
 
     try {
