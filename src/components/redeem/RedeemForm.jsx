@@ -9,6 +9,7 @@ import TokenSelect from "@/components/shared/TokenSelect";
 import ReCAPTCHA from "react-google-recaptcha";
 import { preloadProofs, useWhitelist } from "@/services/whitelistService";
 import { preflightAmountAgainstLimit, quoteAmountUsd18, fetchRemainingUsd18 } from "@/services/limitsService";
+import LoadConsole from "@/components/shared/LoadConsole";
 
 const FN_REDEEM_CANDIDATES = ["redeem(address,uint256,address,bytes32[])"];
 
@@ -16,9 +17,11 @@ const FN_REDEEM_CANDIDATES = ["redeem(address,uint256,address,bytes32[])"];
 function friendlySimError(text) {
   const t = String(text || "").toLowerCase();
   if (t.includes("address not whitelisted")) return "Address not whitelisted";
-  if (t.includes("exceeds daily limit")) return "Insufficient remaining daily limit";
-  if (t.includes("insufficient remaining daily limit")) return "Insufficient remaining daily limit";
-  if (t.includes("amount exceeds daily limit")) return "Insufficient remaining daily limit";
+   if (
+     t.includes("exceeds daily limit") ||
+     t.includes("insufficient remaining daily limit") ||
+     t.includes("amount exceeds daily limit")
+   ) return "Insufficient remaining daily limit";
   if (t.includes("missing revert data")) return "Execution reverted (no reason). Check args/signature.";
   if (t.includes("execution reverted")) return "Execution reverted";
   return text || "Simulation failed";
@@ -75,6 +78,18 @@ export default function RedeemForm({ address: addressProp }) {
   const [loadingBase, setLoadingBase] = useState(true);
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [uiNotice, setUiNotice] = useState(null);
+  // ---- Load logs / progress (preload UX) ----
+  const [bootOpen, setBootOpen] = useState(true);
+  const [bootLogs, setBootLogs] = useState([]); // {ts,msg,level}
+  const [bootStepsDone, setBootStepsDone] = useState(0);
+  const TOTAL_STEPS = 6; // supportedTokens, wone/usdc, vaultBalances, balances, whitelist, limit
+  const addLog = useCallback((msg, level="info") => {
+    setBootLogs((prev) => [...prev, { ts: Date.now(), msg, level }]);
+  }, []);
+  const stepOk = useCallback((msg) => { addLog(msg, "ok"); setBootStepsDone((s)=>s + 1); }, [addLog]);
+  const stepWarn = useCallback((msg) => { addLog(msg, "warn"); setBootStepsDone((s)=>s + 1); }, [addLog]);
+  const stepErr = useCallback((msg) => { addLog(msg, "error"); setBootStepsDone((s)=>s + 1); }, [addLog]);
+
 
   // reCAPTCHA
   const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
@@ -92,21 +107,23 @@ export default function RedeemForm({ address: addressProp }) {
       try {
         if (!readProvider) return;
         setLoadingBase(true);
-
+        addLog("Initializing vault data…");
+        addLog("Fetching supported tokens…");
         const [sup, w, u, bals] = await Promise.all([
           vaultService.getSupportedTokens?.(readProvider).catch(() => []),
           vaultService.wONE?.(readProvider).catch(() => ""),
           vaultService.usdc?.(readProvider).catch(() => ""),
           vaultService.getVaultBalances?.(readProvider).catch(() => ({ woneBalance: 0n, usdcBalance: 0n })),
         ]);
-
         if (!alive) return;
+        stepOk(`Supported tokens: ${Array.isArray(sup) ? sup.length : 0}`);
 
         const supArr = Array.isArray(sup) ? sup.filter(Boolean) : [];
         setSupportedTokens(supArr);
         setWone(w || "");
         setUsdc(u || "");
         setVaultBalances(bals || { woneBalance: 0n, usdcBalance: 0n });
+        stepOk("Core addresses/balances loaded");
 
         if (u) {
           try {
@@ -115,6 +132,7 @@ export default function RedeemForm({ address: addressProp }) {
             setUsdcDecimals(Number(d) || 6);
           } catch {
             setUsdcDecimals(6);
+            stepWarn("USDC decimals fetch failed: using default 6");
           }
         }
 
@@ -124,6 +142,8 @@ export default function RedeemForm({ address: addressProp }) {
           else setRedeemIn(w || u || "");
         }
         if (!tokenIn && supArr[0]) setTokenIn(supArr[0]);
+      } catch (e) {
+        stepErr(`Base load error: ${e?.message || String(e)}`);
       } finally {
         if (alive) setLoadingBase(false);
       }
@@ -140,6 +160,7 @@ export default function RedeemForm({ address: addressProp }) {
       try {
         if (!readProvider || !address || supportedTokens.length === 0) return;
         setLoadingBalances(true);
+        addLog("Loading your token balances…");
 
         const entries = await Promise.all(
           supportedTokens.map(async (addr) => {
@@ -159,6 +180,7 @@ export default function RedeemForm({ address: addressProp }) {
 
         if (!alive) return;
         setBalances(new Map(entries));
+        stepOk("Balances loaded");
       } finally {
         if (alive) setLoadingBalances(false);
       }
@@ -222,6 +244,15 @@ export default function RedeemForm({ address: addressProp }) {
 
   // Whitelist hook
   const { loading: wlLoading, ok: wlOk, error: wlError, proof: wlProof } = useWhitelist(address, readProvider);
+  const bootBusy = loadingBase || loadingBalances || wlLoading || (limitUSD18 === 0n && !!address);
+  const bootProgress = Math.min(100, Math.round((bootStepsDone / TOTAL_STEPS) * 100));
+
+  useEffect(() => {
+    if (!address || !readProvider) return;
+    if (wlLoading) addLog("Checking whitelist status…");
+    else if (wlOk) stepOk("Whitelist: OK");
+    else if (wlError) stepWarn(`Whitelist: ${wlError}`);
+  }, [wlLoading, wlOk, wlError, address, readProvider]);
 
   // Limite diário restante (USD 18dps)
   useEffect(() => {
@@ -229,10 +260,13 @@ export default function RedeemForm({ address: addressProp }) {
     (async () => {
       try {
         if (!readProvider || !address) return;
+        addLog("Fetching remaining daily limit…");
         const rem = await fetchRemainingUsd18(readProvider, address);
         if (alive) setLimitUSD18(rem);
+        if (alive) stepOk("Limit loaded");
       } catch {
         if (alive) setLimitUSD18(0n);
+        stepWarn("Unable to fetch remaining limit");
       }
     })();
     return () => {
@@ -290,8 +324,8 @@ export default function RedeemForm({ address: addressProp }) {
           decimals: outDec,
           symbol: outSym,
           feeAmount: q.feeAmount ?? 0n,
-          maxOut: q.maxOut ?? q.amountOutRedeemToken ?? 0n,
-          burned: q.burned ?? 0n,
+          feeAmountInTokenIn: q.feeAmountInTokenIn ?? 0n,
+          burnAmountInTokenIn: q.burnAmountInTokenIn ?? 0n,
         });
       } catch {
         if (alive) setReceivePreview(null);
@@ -484,6 +518,16 @@ export default function RedeemForm({ address: addressProp }) {
 
   return (
     <div className={styles.contractRedeemCard}>
+      {/* PRELOAD CONSOLE */}
+      <LoadConsole
+        open={bootOpen && (bootBusy || bootLogs.length > 0)}
+        title="Preparing Vault"
+        logs={bootLogs}
+        busy={bootBusy}
+        progress={bootBusy ? bootProgress : null}
+        onClose={() => setBootOpen(false)}
+        
+      />
       <div className={styles.contractRedeemHeader}>
         <h3 className={styles.h3} style={{ margin: 0 }}>Redeem</h3>
       </div>
@@ -564,7 +608,7 @@ export default function RedeemForm({ address: addressProp }) {
         </div>
       </div>
 
-      {/* Amount + Max */}
+      {/* Amount & Max */}
       <div className={styles.field}>
         <label className={styles.smallMuted}>Amount</label>
         <div className={styles.row}>
@@ -618,7 +662,7 @@ export default function RedeemForm({ address: addressProp }) {
           <div className={styles.contractRedeemRow}>
             <span className={styles.contractRedeemLabel}>Fee amount</span>
             <span className={styles.contractRedeemValue}>
-              {formatUnits(receivePreview.feeAmount ?? 0n, receivePreview.decimals)} {receivePreview.symbol}
+              {formatUnits(receivePreview.feeAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}
             </span>
           </div>
 
@@ -639,15 +683,19 @@ export default function RedeemForm({ address: addressProp }) {
           <div className={styles.contractRedeemRow}>
             <span className={styles.contractRedeemLabel}>Daily limit after</span>
             <span className={styles.contractRedeemValue}>
-              ${Number(formatUnits((limitUSD18 ?? 0n) - (amountUSD18 ?? 0n), 18))
-                .toLocaleString(undefined, { maximumFractionDigits: 6 })}
+              {(() => {
+                const rem = limitUSD18 ?? 0n;
+                const amt = amountUSD18 ?? 0n;
+                const after = rem > amt ? (rem - amt) : 0n;
+                return `$${Number(formatUnits(after, 18)).toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
+              })()}
             </span>
           </div>
 
           <div className={styles.contractRedeemRow}>
             <span className={styles.contractRedeemLabel}>Amount burned</span>
             <span className={styles.contractRedeemValue}>
-              {formatUnits(receivePreview.burned ?? 0n, selectedDecimals)} {selectedSymbol}
+              {formatUnits(receivePreview.burnAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}
             </span>
           </div>
         </div>
