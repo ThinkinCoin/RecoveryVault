@@ -155,12 +155,13 @@ export default function StatusRound() {
         </div>
       ) : (
         <>
+          <div className={styles.contractStatusSep} />
           <div className={styles.contractStatusRow}>
             <span className={styles.contractStatusLabel}>Status</span>
             <span className={cx(styles.contractStatusPill, styles[statusClass])}>{statusLabel}</span>
           </div>
 
-          <div className={styles.contractStatusSep} />
+          
 
           <div className={styles.contractStatusRow}>
             <span className={styles.contractStatusSubLabel}>Start Time</span>

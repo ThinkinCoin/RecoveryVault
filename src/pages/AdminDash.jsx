@@ -103,6 +103,7 @@ export default function AdminDash() {
 
   // Supported tokens
   const [supportedTokens, setSupportedTokens] = useState([]);
+  const [tokenSymbols, setTokenSymbols] = useState({});
   const [tokenSel, setTokenSel] = useState("");
   const [tokenAllowed, setTokenAllowed] = useState(true);
   const [tokenInput, setTokenInput] = useState("");
@@ -115,9 +116,9 @@ export default function AdminDash() {
   const [merkleRoot, setMerkleRoot] = useState("");
   const [newOwner, setNewOwner] = useState("");
 
-  // Fee tiers
-  const [feeThresholds, setFeeThresholds] = useState(["100000", "250000", "1000000"]);
-  const [feeBps, setFeeBps] = useState(["100", "50", "25", "10"]);
+  // Fee tiers (agora iniciam vazios e serão preenchidos do contrato)
+  const [feeThresholds, setFeeThresholds] = useState([]);
+  const [feeBps, setFeeBps] = useState([]);
 
   // Forms state (basic)
   const [dailyLimit, setDailyLimit] = useState("");
@@ -146,7 +147,7 @@ export default function AdminDash() {
       } catch {}
 
       // Parallel fetch from contract
-      const [own, ri, wAddr, uAddr, dev, rmc, ora, mroot, sup] = await Promise.all([
+      const [own, ri, wAddr, uAddr, dev, rmc, ora, mroot, sup, feesRaw] = await Promise.all([
         c.owner(),
         c.getRoundInfo(),
         c.wONE(),
@@ -156,6 +157,7 @@ export default function AdminDash() {
         c.oracle(),
         c.merkleRoot(),
         c.getSupportedTokens().catch(() => []),
+        c.getFeeTiers().catch(() => null),
       ]);
 
       // Set round info (tuple)
@@ -170,9 +172,7 @@ export default function AdminDash() {
       // Fetch balances & decimals
       let wdec = 18, udec = 6, wb = 0n, ub = 0n;
       try {
-        const [bals] = await Promise.all([
-          c.getVaultBalances(),
-        ]);
+        const bals = await c.getVaultBalances();
         wb = bals?.woneBalance ?? bals?.[0] ?? 0n;
         ub = bals?.usdcBalance ?? bals?.[1] ?? 0n;
       } catch {}
@@ -190,6 +190,40 @@ export default function AdminDash() {
         }
       } catch {}
 
+      // Token symbols (para select de supportedTokens)
+      const symEntries = await Promise.all(
+        (Array.isArray(sup) ? sup : []).map(async (addr) => {
+          if (!ethers.isAddress(addr)) return [addr, addr];
+          try {
+            const erc = new ethers.Contract(addr, ["function symbol() view returns (string)"], provider);
+            const sym = await erc.symbol();
+            return [addr, sym];
+          } catch {
+            return [addr, addr];
+          }
+        })
+      );
+      const symbols = Object.fromEntries(symEntries);
+
+      // Fee tiers (suporta tanto tuple [thresholds, bps] quanto objeto {thresholds, bps} / {thresholds, bpsOut})
+      if (feesRaw) {
+        let thresholdsArr = [];
+        let bpsArr = [];
+        if (Array.isArray(feesRaw) && feesRaw.length >= 2) {
+          thresholdsArr = feesRaw[0] ?? [];
+          bpsArr = feesRaw[1] ?? [];
+        } else if (feesRaw.thresholds && (feesRaw.bps || feesRaw.bpsOut)) {
+          thresholdsArr = feesRaw.thresholds;
+          bpsArr = feesRaw.bps ?? feesRaw.bpsOut;
+        }
+        setFeeThresholds((thresholdsArr || []).map((x) => x.toString()));
+        setFeeBps((bpsArr || []).map((x) => x.toString()));
+      } else {
+        // Se a chamada falhar, mantém arrays atuais (vazios) para evitar hardcode.
+        setFeeThresholds((prev) => prev.length ? prev : []);
+        setFeeBps((prev) => prev.length ? prev : []);
+      }
+
       setOwner(own);
       setAccount(acc);
       setIsOwner(toLower(acc) === toLower(own));
@@ -204,6 +238,7 @@ export default function AdminDash() {
       setOracleAddr(ora);
       setMerkleRoot(mroot);
       setSupportedTokens(Array.isArray(sup) ? sup : []);
+      setTokenSymbols(symbols);
       setLocked(round.paused);
     } catch (e) {
       console.warn("[AdminDash] loadBasics error:", e);
@@ -614,7 +649,11 @@ export default function AdminDash() {
                 <label className={styles.smallMuted}>Select token</label>
                 <select className={styles.select} value={tokenSel} onChange={(e) => setTokenSel(e.target.value)} disabled={!isOwner || busy.token || busy.tokenPrice}>
                   <option value="">—</option>
-                  {supportedTokens.map((t) => (<option key={t} value={t}>{t}</option>))}
+                  {supportedTokens.map((t) => (
+                    <option key={t} value={t}>
+                      {tokenSymbols[t] ? `${tokenSymbols[t]} (${t})` : t}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className={styles.field}>

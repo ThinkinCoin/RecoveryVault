@@ -166,7 +166,6 @@ export default function WalletChecker({ address, proofsUrl = "/data/proofs.json"
   return (
     <div className={`${styles.contractLimitsCard}  ${className || ""}`}>
       <LimitChecker address={address} />
-      <span className={styles.contractLimitsTitle}>Eligibility</span>
       {ui}
 
       {/* Optional proof details (hidden unless available) */}

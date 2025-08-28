@@ -1,5 +1,5 @@
 {
-  "name": "Harmony Tokens List",
+  "name": " Horizon Harmony Tokens List",
   "chainId": 1666600000,
   "tokens": [
     {
@@ -7,64 +7,64 @@
       "chainId": 1666600000,
       "decimals": 6,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/USDC.jpg",
-      "name": "USD Coin",
-      "symbol": "dUSDC"
+      "name": " Horizon USD Coin",
+      "symbol": "USDC"
     },
     {
       "address": "0x3C2B8Be99c50593081EAA2A724F0B8285F5aba8f",
       "chainId": 1666600000,
       "decimals": 6,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/USDT.jpg",
-      "name": "Tether USD",
-      "symbol": "dUSDT"
+      "name": " Horizon Tether USD",
+      "symbol": "USDT"
     },
     {
       "address": "0x6983D1E6DEf3690C4d616b13597A09e6193EA013",
       "chainId": 1666600000,
       "decimals": 18,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/wETH.jpg",
-      "name": "Ether",
-      "symbol": "dwETH"
+      "name": " Horizon Ether",
+      "symbol": "wETH"
     },
     {
       "address": "0xE176EBE47d621b984a73036B9DA5d834411ef734",
       "chainId": 1666600000,
       "decimals": 18,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/BUSD.jpg",
-      "name": "Binance USD",
-      "symbol": "dBUSD"
+      "name": " Horizon Binance USD",
+      "symbol": "BUSD"
     },
     {
       "address": "0x0aB43550A6915F9f67d0c454C2E90385E6497EaA",
       "chainId": 1666600000,
       "decimals": 18,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/bscBUSD.jpg",
-      "name": "BUSD Token",
-      "symbol": "dbscBUSD"
+      "name": " Horizon BUSD Token",
+      "symbol": "bscBUSD"
     },
     {
       "address": "0x3095c7557bCb296ccc6e363DE01b760bA031F2d9",
       "chainId": 1666600000,
       "decimals": 8,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/wBTC.jpg",
-      "name": "Bitcoin",
-      "symbol": "dwBTC"
+      "name": " Horizon Bitcoin",
+      "symbol": "wBTC"
     },
     {
       "address": "0xEf977d2f931C1978Db5F6747666fa1eACB0d0339",
       "chainId": 1666600000,
       "decimals": 18,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/DAI.jpg",
-      "name": "Dai Stablecoin",
-      "symbol": "dDAI"
+      "name": " Horizon Dai Stablecoin",
+      "symbol": "DAI"
     },
     {
       "address": "0xdc54046c0451f9269FEe1840aeC808D36015697d",
       "chainId": 1666600000,
       "decimals": 8,
       "logoURI": "https://raw.githubusercontent.com/mzfshark/dex-aggregator/refs/heads/prod/src/assets/logos/1BTC.png",
-      "name": "1BTC",
-      "symbol": "d1BTC"
+      "name": " Horizon 1BTC",
+      "symbol": "1BTC"
     }
   ]
 }

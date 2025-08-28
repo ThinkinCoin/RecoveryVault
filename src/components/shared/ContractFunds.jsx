@@ -1,20 +1,20 @@
 // src/components/ContractFunds.jsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ethers } from "ethers";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { useOnePrice } from "@/hooks/useOnePrice";
-import { getFeeTiers, selectTierForUsd } from "@/services/feeService.jsx";
+import { getVaultStatus } from "@/services/vaultService"; // ✅ no ".jsx"
+import { ethers } from "ethers";
 
-const ERC20_ABI = [
-  "function balanceOf(address) view returns (uint256)",
-  "function decimals() view returns (uint8)",
-  "function symbol() view returns (string)",
-];
-
+// Format helpers
 function formatUSD(value) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return "$0.00";
-  return n.toLocaleString(undefined, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function clamp(num, min, max) {
@@ -36,8 +36,6 @@ export default function ContractFunds() {
 
   const [usdcBalance, setUsdcBalance] = useState(0);
   const [woneBalance, setWoneBalance] = useState(0);
-  const [usdcSymbol, setUsdcSymbol] = useState("USDC");
-  const [woneSymbol, setWoneSymbol] = useState("wONE");
   const [netUsd, setNetUsd] = useState(0);
   const [lastUpdated, setLastUpdated] = useState(null);
 
@@ -45,101 +43,79 @@ export default function ContractFunds() {
   const [activeTier, setActiveTier] = useState(null);
   const [activePct, setActivePct] = useState(null);
 
-  const RPC_URL = import.meta.env.VITE_RPC_URL;
-  const VAULT_ADDRESS = import.meta.env.VITE_VAULT_ADDRESS;
-  const USDC_ADDRESS = import.meta.env.VITE_USDC_ADDRESS;
-  const WONE_ADDRESS = import.meta.env.VITE_WONE_ADDRESS;
   const ONE_USD_OVERRIDE = import.meta.env.VITE_ONE_USD_OVERRIDE;
 
   // ONE/USD price via Band hook
   const { price: onePriceHook, error: onePriceErr, reload: reloadOnePrice } = useOnePrice();
 
+  // Refs to avoid loops and race conditions
+  const oneUsdRef = useRef(0);
+  const isMountedRef = useRef(false);
+  const isBusyRef = useRef(false);
+  const reloadRef = useRef(reloadOnePrice);
   const intervalRef = useRef(null);
 
-  const provider = useMemo(() => {
-    try {
-      if (!RPC_URL) return null;
-      return new ethers.JsonRpcProvider(RPC_URL);
-    } catch (err) {
-      console.error("[ContractFunds] Provider init error:", err);
-      return null;
+  // Keep the latest reload function without retriggering effects
+  useEffect(() => {
+    reloadRef.current = reloadOnePrice;
+  }, [reloadOnePrice]);
+
+  // Keep the latest ONE price (override has priority)
+  useEffect(() => {
+    let next = Number.isFinite(onePriceHook) ? Number(onePriceHook) : NaN;
+    const ov = Number(ONE_USD_OVERRIDE);
+    if (Number.isFinite(ov) && ov > 0) {
+      next = ov;
     }
-  }, [RPC_URL]);
-
-  const getTokenMeta = useCallback(async (addr) => {
-    const c = new ethers.Contract(addr, ERC20_ABI, provider);
-    const [dec, sym] = await Promise.all([
-      c.decimals(),
-      c.symbol().catch(() => "TOKEN"),
-    ]);
-    return { decimals: Number(dec), symbol: sym };
-  }, [provider]);
-
-  const fetchBalances = useCallback(async () => {
-    if (!provider) throw new Error("Provider not ready");
-    if (!VAULT_ADDRESS || !USDC_ADDRESS || !WONE_ADDRESS) throw new Error("Missing env: VAULT/WONE/USDC addresses");
-
-    const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
-    const wone = new ethers.Contract(WONE_ADDRESS, ERC20_ABI, provider);
-
-    const [rawU, rawW, metaU, metaW] = await Promise.all([
-      usdc.balanceOf(VAULT_ADDRESS),
-      wone.balanceOf(VAULT_ADDRESS),
-      getTokenMeta(USDC_ADDRESS),
-      getTokenMeta(WONE_ADDRESS),
-    ]);
-
-    const u = Number(ethers.formatUnits(rawU, metaU.decimals));
-    const w = Number(ethers.formatUnits(rawW, metaW.decimals));
-
-    setUsdcSymbol(metaU.symbol);
-    setWoneSymbol(metaW.symbol);
-    setUsdcBalance(u);
-    setWoneBalance(w);
-
-    return { usdc: u, wone: w };
-  }, [provider, VAULT_ADDRESS, USDC_ADDRESS, WONE_ADDRESS, getTokenMeta]);
+    if (!Number.isFinite(next)) {
+      next = 0;
+      if (onePriceErr) {
+        console.warn("[ContractFunds] ONE price unavailable via hook:", onePriceErr);
+      }
+    }
+    oneUsdRef.current = next;
+  }, [onePriceHook, onePriceErr, ONE_USD_OVERRIDE]);
 
   const compute = useCallback(async () => {
+    if (isBusyRef.current) return;
+    isBusyRef.current = true;
+
     setIsLoading(true);
     setError("");
+
     try {
-      console.log("[ContractFunds] compute: start");
+      console.log("[ContractFunds] compute via vaultService");
 
-      // 1) saldos
-      const { usdc, wone } = await fetchBalances();
+      // Read-only provider for contract reads
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const status = await getVaultStatus(provider);
+      if (!isMountedRef.current) return;
 
-      // 2) preço ONE/USD (hook) com fallback para override
-      let oneUsd = Number.isFinite(onePriceHook) ? Number(onePriceHook) : NaN;
-      if (!Number.isFinite(oneUsd)) {
-        const ov = Number(ONE_USD_OVERRIDE);
-        if (Number.isFinite(ov) && ov > 0) {
-          oneUsd = ov;
-        } else {
-          oneUsd = 0; // sem oracle => contribui 0 no valor USD
-          if (onePriceErr) {
-            console.warn("[ContractFunds] ONE price unavailable via hook:", onePriceErr);
-          }
-        }
-      }
+      const u = Number(status?.balances?.usdc ?? 0n) / 1e6;   // USDC 6 decimals
+      const w = Number(status?.balances?.wone ?? 0n) / 1e18;  // wONE 18 decimals
+      const oneUsd = oneUsdRef.current;
 
-      // 3) Net USD (USDC ~ 1:1 + wONE * preço)
-      const totalUsd = usdc + wone * oneUsd;
+      setUsdcBalance(u);
+      setWoneBalance(w);
+
+      const totalUsd = u + w * oneUsd;
       setNetUsd(totalUsd);
 
-      // 4) Fee Tier baseada no Net USD inteiro (apenas para display)
-      try {
-        const tiers = await getFeeTiers(provider);
-        const selected = selectTierForUsd(Math.floor(totalUsd), tiers);
-        if (selected) {
-          setActiveTier(selected.tier);
-          setActivePct(`${(selected.pct).toFixed(2)}%`);
-        } else {
-          setActiveTier(null);
-          setActivePct(null);
+      // Active fee tier from contract thresholds
+      if (status?.feeThresholds?.length && status?.feeBps?.length) {
+        let tierIdx = null;
+        let pctText = null;
+
+        for (let i = 0; i < status.feeThresholds.length; i++) {
+          if (totalUsd >= Number(status.feeThresholds[i])) {
+            tierIdx = i + 1;
+            pctText = `${(status.feeBps[i] / 100).toFixed(2)}%`;
+          }
         }
-      } catch (e) {
-        console.error("[ContractFunds] fee tiers error:", e);
+
+        setActiveTier(tierIdx);
+        setActivePct(pctText);
+      } else {
         setActiveTier(null);
         setActivePct(null);
       }
@@ -147,31 +123,43 @@ export default function ContractFunds() {
       setLastUpdated(new Date());
     } catch (err) {
       console.error("[ContractFunds] compute error:", err);
-      setError(err?.message || "Unexpected error while computing vault funds");
+      if (isMountedRef.current) {
+        setError(err?.message || "Unexpected error while computing vault funds");
+      }
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) setIsLoading(false);
+      isBusyRef.current = false;
     }
-  }, [fetchBalances, onePriceHook, onePriceErr, ONE_USD_OVERRIDE, provider]);
+  }, []); // ✅ stable reference; no loop from hook deps
 
   useEffect(() => {
-    // primeira carga
-    compute();
-    // agendamento
+    isMountedRef.current = true;
+    compute(); // run once on mount
+
+    // Single interval (10min). Does not re-run when hook changes.
     intervalRef.current = setInterval(() => {
-      // tenta recarregar preço e recomputar
-      try { reloadOnePrice?.(); } catch {}
+      try {
+        reloadRef.current?.(); // refresh price source lazily
+      } catch {}
       compute();
     }, 600_000);
+
     return () => {
+      isMountedRef.current = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [compute, reloadOnePrice]);
+  }, [compute]); // compute is stable
 
   return (
     <div className={styles.contractFundsCard}>
       <div className={styles.contractFundsHeader}>
         <span className={styles.contractFundsTitle}>Vault Funds</span>
-        <button type="button" className={styles.contractFundsRefreshBtn} onClick={compute} disabled={isLoading}>
+        <button
+          type="button"
+          className={styles.contractFundsRefreshBtn}
+          onClick={compute}
+          disabled={isLoading}
+        >
           {isLoading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
@@ -182,21 +170,21 @@ export default function ContractFunds() {
         </div>
       ) : (
         <>
+          <div className={styles.contractFundsSep} />
+
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsLabel}>Net Value</span>
             <span className={styles.contractFundsValue}>{formatUSD(netUsd)}</span>
           </div>
 
-          <div className={styles.contractFundsSep} />
-
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsLabel}>wONE Balance</span>
-            <span className={styles.contractFundsValue}>{formatAmount(woneBalance, 4)} </span>
+            <span className={styles.contractFundsValue}>{formatAmount(woneBalance, 4)}</span>
           </div>
 
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsLabel}>USDC Balance</span>
-            <span className={styles.contractFundsValue}>{formatAmount(usdcBalance, 2)} </span>
+            <span className={styles.contractFundsValue}>{formatAmount(usdcBalance, 2)}</span>
           </div>
 
           <div className={styles.contractFundsSep} />
@@ -204,12 +192,12 @@ export default function ContractFunds() {
           <div className={styles.contractFundsRow}>
             <span className={styles.contractFundsLabel}>Active Fee</span>
             <span className={`${styles.contractFundsPill} ${styles.contractFundsTier}`}>
-            {Number.isFinite(activeTier) && activePct && (
-              <span title="Fee Tier based on the vault's net USD (display only)">
-              
-              {`Tier ${activeTier}`} <span className={styles.contractFundsSubValue}>{activePct} </span> 
-              </span>
-            )}
+              {Number.isFinite(activeTier) && activePct && (
+                <span title="Fee Tier based on the vault's net USD (from contract)">
+                  {`Tier ${activeTier}`}{" "}
+                  <span className={styles.contractFundsSubValue}>{activePct}</span>
+                </span>
+              )}
             </span>
           </div>
 
