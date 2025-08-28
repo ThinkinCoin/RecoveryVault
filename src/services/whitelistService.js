@@ -1,6 +1,12 @@
 // src/services/whitelistService.js
 import { ethers } from "ethers";
 import * as vaultService from "@/services/vaultService";
+import { fetchJsonPlus } from "@/debug/fetchPlus";
+
+import { log, ok, warn, error } from "@/debug/logger";
+
+
+
 
 /**
  * Estratégia:
@@ -50,6 +56,7 @@ async function fetchJson(url, { timeoutMs = 6000 } = {}) {
   }
 }
 
+{/* Temporary disable
 async function fetchFirstOk(urls) {
   for (const u of urls) {
     const j = await fetchJson(u);
@@ -57,6 +64,8 @@ async function fetchFirstOk(urls) {
   }
   return null;
 }
+  */}
+async function fetchFirstOk(urls) { return await fetchJsonPlus(urls, { timeoutMs: 20000 }); }
 
 function toBytes32Array(arr) {
   if (!Array.isArray(arr)) return [];
@@ -265,7 +274,9 @@ export function useWhitelist(address, provider) {
           rootMismatch: res.rootMismatch,
           error: res.ok ? undefined : res.reason,
         });
+        ok("Whitelist: proofs loaded");
       } catch (e) {
+        error(`Whitelist: ${e?.message || e}`);
         if (!alive) return;
         setState({
           loading: false,

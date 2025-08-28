@@ -11,6 +11,11 @@ import { preloadProofs, useWhitelist } from "@/services/whitelistService";
 import { preflightAmountAgainstLimit, quoteAmountUsd18, fetchRemainingUsd18 } from "@/services/limitsService";
 import LoadConsole from "@/components/shared/LoadConsole";
 
+import { log as debugLog, ok as debugOk, warn as debugWarn, error as debugError } from "@/debug/logger";
+
+
+
+
 const FN_REDEEM_CANDIDATES = ["redeem(address,uint256,address,bytes32[])"];
 
 // UPDATED: adiciona variações para caber no revert do contrato (“Exceeds daily limit”)
@@ -109,6 +114,7 @@ export default function RedeemForm({ address: addressProp }) {
         setLoadingBase(true);
         addLog("Initializing vault data…");
         addLog("Fetching supported tokens…");
+        debugLog("RedeemForm: fetching supported tokens…");
         const [sup, w, u, bals] = await Promise.all([
           vaultService.getSupportedTokens?.(readProvider).catch(() => []),
           vaultService.wONE?.(readProvider).catch(() => ""),
@@ -116,9 +122,12 @@ export default function RedeemForm({ address: addressProp }) {
           vaultService.getVaultBalances?.(readProvider).catch(() => ({ woneBalance: 0n, usdcBalance: 0n })),
         ]);
         if (!alive) return;
-        stepOk(`Supported tokens: ${Array.isArray(sup) ? sup.length : 0}`);
+
+
 
         const supArr = Array.isArray(sup) ? sup.filter(Boolean) : [];
+        stepOk(`Supported tokens: ${Array.isArray(sup) ? sup.length : 0}`);
+        debugOk(`RedeemForm: supported tokens loaded (${supArr.length})`);
         setSupportedTokens(supArr);
         setWone(w || "");
         setUsdc(u || "");
@@ -133,6 +142,8 @@ export default function RedeemForm({ address: addressProp }) {
           } catch {
             setUsdcDecimals(6);
             stepWarn("USDC decimals fetch failed: using default 6");
+            debugWarn("USDC decimals fetch failed: defaulting to 6");
+
           }
         }
 
@@ -144,6 +155,7 @@ export default function RedeemForm({ address: addressProp }) {
         if (!tokenIn && supArr[0]) setTokenIn(supArr[0]);
       } catch (e) {
         stepErr(`Base load error: ${e?.message || String(e)}`);
+        debugError(`Base load error: ${e.message}`);
       } finally {
         if (alive) setLoadingBase(false);
       }

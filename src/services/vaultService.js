@@ -1,5 +1,5 @@
 // src/services/vaultService.jsx
-import { Contract, Interface, JsonRpcProvider, getAddress } from "ethers";
+import { Contract, Interface, JsonRpcProvider, getAddress } from "ethers"; //disabled for debug
 import VaultArtifact from "@/ui/abi/RecoveryVaultABI.json";
 import IWETHABI from "@/ui/abi/IWETH.json";
 import IOracleABI from "@/ui/abi/IOracle.json";
@@ -9,6 +9,12 @@ import {
   isActionRejected,
   buildGasFees,
 } from "@/services/txUtils";
+
+import { TracedProvider } from "@/debug/TracedProvider"; // debugger
+
+import { log, ok, warn, error as logError } from "@/debug/logger";
+
+
 
 // ==========================
 // Core
@@ -26,7 +32,11 @@ function req(v, msg) {
 
 export function getDefaultProvider() {
   req(RPC_URL, "[vaultService] VITE_RPC_URL is missing");
-  return new JsonRpcProvider(RPC_URL);
+//  return new JsonRpcProvider(RPC_URL); <= Debugger temp
+  try { return new TracedProvider(RPC_URL); }
+  catch { return new JsonRpcProvider(RPC_URL); }
+
+
 }
 
 export function getVaultAddress() {
@@ -260,6 +270,7 @@ export function getEventTopics() {
  */
 export async function preflightReadChecks(vault, provider, ctx) {
   try {
+    log("Vault: preflight checks start");
     const { user, tokenIn, amountIn, redeemIn, proof } = ctx || {};
     if (!user)  return { ok: false, reason: "Connect a wallet" };
     if (!tokenIn) return { ok: false, reason: "Select a token" };
@@ -309,6 +320,7 @@ export async function preflightReadChecks(vault, provider, ctx) {
     if (typeof vault.quoteRedeem === "function") {
       try {
         const q = await vault.quoteRedeem(user, tokenIn, amountIn, redeemIn, Array.isArray(proof) ? proof : []);
+        ok("Vault: quoteRedeem ok");
         const whitelisted     = Boolean(q[0]);
         const roundIsActive   = Boolean(q[1]);
         const userLimitBefore = BigInt(q[4]); // USD inteiros
@@ -333,8 +345,11 @@ export async function preflightReadChecks(vault, provider, ctx) {
       } catch (err) {
         if (!isDecode0x(err)) {
           const reason = extractRpcRevert(err, vault.interface);
+          logError(`Vault: quoteRedeem revert: ${reason || err?.message || "unknown"}`);
           return { ok: false, reason: reason || "quote failed" };
         }
+        if (DEV) console.warn("[vaultService] quoteRedeem returned 0x/BAD_DATA; using fallback checks");
+        warn("Vault: quoteRedeem BAD_DATA, using fallback");
         if (DEV) console.warn("[vaultService] quoteRedeem returned 0x/BAD_DATA; using fallback checks");
       }
     } else if (DEV) {
@@ -535,8 +550,10 @@ export async function submitRedeem(signerContract, { fn, args }, opts = {}) {
     try {
       const v = await getWriteContract(signerContract);
       const reason = extractRpcRevert(err, v.interface);
+      logError(`Vault: submit error ${reason || err?.message || "send failed"}`);
       return { ok: false, reason: reason || err?.message || "send failed" };
     } catch {
+      logError(`Vault: submit error ${err?.message || "send failed"}`);
       return { ok: false, reason: err?.message || "send failed" };
     }
   }
