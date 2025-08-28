@@ -3,6 +3,7 @@
 
 import { createAppKit } from '@reown/appkit/react';
 import { EthersAdapter } from '@reown/appkit-adapter-ethers';
+import { defineChain } from '@reown/appkit/networks';
 
 const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
 
@@ -12,17 +13,21 @@ const RPC_URL =
   import.meta.env.VITE_RPC_URL ??
   '';
 
-export const harmony = {
+const CAIP_ID = `eip155:${CHAIN_ID}`;
+
+export const harmony = defineChain({
   id: CHAIN_ID,
+  caipNetworkId: CAIP_ID,
+  chainNamespace: 'eip155',
   name: 'Harmony',
   nativeCurrency: { name: 'ONE', symbol: 'ONE', decimals: 18 },
   rpcUrls: { default: { http: [RPC_URL] } },
   blockExplorers: {
     default: { name: 'Harmony Explorer', url: 'https://explorer.harmony.one' }
   }
-};
+});
 
-// ⚠️ Vite uses import.meta.env, not process.env
+// Vite uses import.meta.env, not process.env
 const projectId = (import.meta.env.VITE_REOWN_PROJECT_ID || '6ff2ca0616c53aac6bc306fe0b678a8f').trim();
 if (!projectId) {
   console.error('[AppKit] Missing VITE_REOWN_PROJECT_ID');
@@ -32,7 +37,7 @@ const isProd = import.meta.env.PROD;
 const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
 const appUrl = isProd
   ? (import.meta.env.VITE_REOWN_APP_URL || pageOrigin)
-  : pageOrigin; // dev: sempre igual ao origin corrente
+  : pageOrigin;
 const appIcon = isProd
   ? (import.meta.env.VITE_REOWN_APP_ICON || `${appUrl}/icon-512.png`)
   : `${pageOrigin}/icon-512.png`;
@@ -54,8 +59,35 @@ export const modal = projectId
       networks: [harmony],
       projectId,
       metadata,
-      // If analytics cause warnings during setup, disable:
-      features: { analytics: false }
+
+      // Harmony-only UX
+      defaultNetwork: harmony,
+      enableNetworkSwitch: false,
+      allowUnsupportedChain: false,
+
+      // Keep WalletConnect enabled and allow injected wallets if needed
+      enableWalletConnect: true,
+      enableWallets: true,
+
+      // Hard-pin RPC for Harmony
+      customRpcUrls: {
+        [CAIP_ID]: [{ url: RPC_URL }]
+      },
+
+      // Restrict WC provider strictly to Harmony
+      universalProviderConfigOverride: {
+        // IMPORTANT: chains must be CAIP strings, not numeric ids
+        chains: { eip155: [CAIP_ID] },
+        defaultChain: CAIP_ID,
+        rpcMap: { [CAIP_ID]: RPC_URL }
+      },
+
+      // Helpful while testing
+      enableReconnect: true,
+      debug: true,
+
+      // Disable extras we don't use
+      features: { analytics: false, swaps: false, onramp: false }
     })
   : null;
 

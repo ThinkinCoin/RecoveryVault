@@ -1,6 +1,9 @@
 // src/services/txUtils.js
 import { Interface } from "ethers";
 
+const FORCE_LEGACY =
+  String(import.meta?.env?.VITE_FORCE_LEGACY_GAS || "").toLowerCase() === "true";
+
 /** USD must be integer (no decimals) */
 export function normalizeUsdInt(value) {
   if (typeof value === "string") value = value.trim().replace(",", ".");
@@ -39,21 +42,16 @@ export function extractRpcRevert(err, iface) {
         }
       } catch (_) {}
     }
-    // no final de extractRpcRevert(...)
+
     const msg =
       err?.shortMessage ||
       err?.reason ||
       err?.message ||
       "Execution reverted";
 
-    if (/could not decode result data/i.test(String(msg))) {
-      return "Execution reverted (no reason)"; // evita mensagem confusa
-    }
-    if (/missing revert data/i.test(String(msg))) {
-      return "Execution reverted (no reason)";
-    }
+    if (/could not decode result data/i.test(String(msg))) return "Execution reverted (no reason)";
+    if (/missing revert data/i.test(String(msg))) return "Execution reverted (no reason)";
     return msg;
-
   } catch (_) {}
 
   return err?.shortMessage || err?.reason || err?.message || "Execution reverted";
@@ -70,34 +68,49 @@ export async function safeEstimateGas(contract, fnName, args, opts = {}) {
   const fallback = opts?.fallback != null ? BigInt(opts.fallback) : 300000n;
   const overrides = opts?.overrides || {};
   try {
-    // aceita assinatura completa: pega só o nome para estimateGas
+    // aceita assinatura completa: pega só o nome p/ estimateGas
     const nameOnly = String(fnName).includes("(")
       ? String(fnName).slice(0, String(fnName).indexOf("("))
       : String(fnName);
-    const est = await contract.estimateGas[nameOnly](...args, overrides);
+
+    // ✅ sem TypeError: use o getter da API v6
+    const estimator = contract.estimateGas.getFunction(nameOnly);
+    const est = await estimator(...(args || []), overrides);
     return est;
   } catch (err) {
-    console.warn("[safeEstimateGas] estimate failed, using fallback", err);
+    // deixe o warn discreto; vamos cair no fallback
+    console.warn("[safeEstimateGas] estimate failed, using fallback");
     return fallback;
   }
 }
 
-
-
 /** Choose EIP-1559 fees if available, else legacy gasPrice */
 export async function buildGasFees(provider) {
+  // Harmony: prefira legacy quando forçamos por env
+  if (FORCE_LEGACY) {
+    try {
+      const gasPrice = await provider?.getGasPrice?.();
+      return gasPrice ? { gasPrice } : {};
+    } catch {
+      return {};
+    }
+  }
+
   try {
     const fd = await provider?.getFeeData?.();
-    const fees = {};
     if (fd?.maxFeePerGas != null && fd?.maxPriorityFeePerGas != null) {
-      fees.maxFeePerGas = fd.maxFeePerGas;
-      fees.maxPriorityFeePerGas = fd.maxPriorityFeePerGas;
-    } else if (fd?.gasPrice != null) {
-      fees.gasPrice = fd.gasPrice;
+      return { maxFeePerGas: fd.maxFeePerGas, maxPriorityFeePerGas: fd.maxPriorityFeePerGas };
     }
-    return fees;
-  } catch (err) {
-    console.warn("[buildGasFees] feeData unavailable", err);
+    if (fd?.gasPrice != null) return { gasPrice: fd.gasPrice };
+  } catch {
+    // silenciar erro do eth_maxPriorityFeePerGas ausente
+  }
+
+  // fallback final -> legacy
+  try {
+    const gasPrice = await provider?.getGasPrice?.();
+    return gasPrice ? { gasPrice } : {};
+  } catch {
     return {};
   }
 }

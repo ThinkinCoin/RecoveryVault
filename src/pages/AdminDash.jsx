@@ -3,7 +3,7 @@ import styles from "@/styles/Global.module.css";
 import { useContractContext } from "@/contexts/ContractContext";
 import Footer from "@/ui/layout/footer";
 import WalletConnection from "@/components/wallet/WalletConnection";
-import { useAppKitAccount } from "@reown/appkit/react";
+import { useAppKit, useAppKitAccount } from "@reown/appkit/react";
 import * as vaultService from "@/services/vaultService";
 import { ethers } from "ethers";
 
@@ -64,6 +64,7 @@ function Section({ title, children, right }) {
   );
 }
 
+// Restored header: title + WalletConnection button
 function HeaderFrame() {
   return (
     <header className={styles.header}>
@@ -72,11 +73,14 @@ function HeaderFrame() {
           <div className={styles.headerLeft}>
             <a href="/"><img src="/logo.png" alt="Recovery Vault" className={styles.logoImg} /></a>
           </div>
-          <div className={styles.headerCenter} >
+          <div className={styles.headerCenter}>
             <div className={styles.brandText} style={{ fontWeight: 700 }}>Admin Dashboard</div>
           </div>
           <div className={styles.headerRight}>
-            <div className={styles.headerRightInner}><WalletConnection /></div>
+            <div className={styles.headerRightInner}>
+              {/* Put the connect widget back */}
+              <WalletConnection />
+            </div>
           </div>
         </div>
       </div>
@@ -84,9 +88,12 @@ function HeaderFrame() {
   );
 }
 
+
 export default function AdminDash() {
-  const { provider: ctxProvider, account: ctxAccount } = useContractContext();
+  // signer from ContractContext (WalletConnect/multisig)
+  const { provider: ctxProvider, account: ctxAccount, signer: ctxSigner } = useContractContext();
   const appkitAccount = useAppKitAccount ? useAppKitAccount() : undefined;
+  const { open } = useAppKit();
 
   const [owner, setOwner] = useState("");
   const [account, setAccount] = useState("");
@@ -116,7 +123,7 @@ export default function AdminDash() {
   const [merkleRoot, setMerkleRoot] = useState("");
   const [newOwner, setNewOwner] = useState("");
 
-  // Fee tiers (agora iniciam vazios e serão preenchidos do contrato)
+  // Fee tiers
   const [feeThresholds, setFeeThresholds] = useState([]);
   const [feeBps, setFeeBps] = useState([]);
 
@@ -130,6 +137,7 @@ export default function AdminDash() {
   const [notice, setNotice] = useState(null);
 
   const provider = useMemo(() => ctxProvider || vaultService.getDefaultProvider?.() || null, [ctxProvider]);
+  const canWrite = Boolean(ctxSigner);
 
   // --- Load basics from contract ---
   const loadBasics = useCallback(async () => {
@@ -138,13 +146,8 @@ export default function AdminDash() {
       if (!provider) throw new Error("Provider not available");
       const c = await vaultService.getReadContract(provider);
 
-      // Resolve connected account (wallet)
-      let acc = "";
-      try {
-        if (appkitAccount?.address) acc = appkitAccount.address;
-        else if (ctxAccount) acc = ctxAccount;
-        else if (provider.getSigner) acc = await (await provider.getSigner()).getAddress();
-      } catch {}
+      // Resolve connected account (NEVER call getSigner() from JsonRpcProvider here)
+      const acc = appkitAccount?.address || ctxAccount || "";
 
       // Parallel fetch from contract
       const [own, ri, wAddr, uAddr, dev, rmc, ora, mroot, sup, feesRaw] = await Promise.all([
@@ -160,7 +163,6 @@ export default function AdminDash() {
         c.getFeeTiers().catch(() => null),
       ]);
 
-      // Set round info (tuple)
       const round = {
         roundId: ri?.roundId ?? ri?.[0] ?? 0n,
         startTime: ri?.startTime ?? ri?.[1] ?? 0n,
@@ -169,7 +171,7 @@ export default function AdminDash() {
         limitUsd: ri?.limitUsd ?? ri?.[4] ?? 0n,
       };
 
-      // Fetch balances & decimals
+      // Balances & decimals
       let wdec = 18, udec = 6, wb = 0n, ub = 0n;
       try {
         const bals = await c.getVaultBalances();
@@ -190,7 +192,7 @@ export default function AdminDash() {
         }
       } catch {}
 
-      // Token symbols (para select de supportedTokens)
+      // Token symbols
       const symEntries = await Promise.all(
         (Array.isArray(sup) ? sup : []).map(async (addr) => {
           if (!ethers.isAddress(addr)) return [addr, addr];
@@ -205,7 +207,7 @@ export default function AdminDash() {
       );
       const symbols = Object.fromEntries(symEntries);
 
-      // Fee tiers (suporta tanto tuple [thresholds, bps] quanto objeto {thresholds, bps} / {thresholds, bpsOut})
+      // Fee tiers
       if (feesRaw) {
         let thresholdsArr = [];
         let bpsArr = [];
@@ -219,7 +221,6 @@ export default function AdminDash() {
         setFeeThresholds((thresholdsArr || []).map((x) => x.toString()));
         setFeeBps((bpsArr || []).map((x) => x.toString()));
       } else {
-        // Se a chamada falhar, mantém arrays atuais (vazios) para evitar hardcode.
         setFeeThresholds((prev) => prev.length ? prev : []);
         setFeeBps((prev) => prev.length ? prev : []);
       }
@@ -269,7 +270,6 @@ export default function AdminDash() {
         const c = await vaultService.getReadContract(provider);
         const p = await c.fixedUsdPrice(tokenSel);
         const norm = ethers.formatUnits(p || 0n, 18);
-        // Hide zeros for UX; user can type 0 to clear
         setFixedPrice((norm === "0.0" || norm === "0") ? "" : norm);
       } catch {
         setFixedPrice("");
@@ -277,14 +277,18 @@ export default function AdminDash() {
     })();
   }, [provider, tokenSel]);
 
+  // ⚠️ Do NOT block by owner here; contracts will enforce ownership.
   const requireOwnerAndSigner = useCallback(async () => {
     if (!provider) throw new Error("Provider not available");
-    const signer = provider.getSigner ? await provider.getSigner() : null;
-    if (!signer) throw new Error("Connect a wallet to proceed");
-    const signerAddr = await signer.getAddress();
-    if (toLower(signerAddr) !== toLower(owner)) throw new Error("Only the owner can perform this action");
-    return { signer };
-  }, [provider, owner]);
+    if (!ctxSigner) throw new Error("Connect a wallet in AppKit to proceed");
+    try {
+      const signerAddr = await ctxSigner.getAddress();
+      if (toLower(signerAddr) !== toLower(owner)) {
+        console.warn("[AdminDash] signer is not equal to on-chain owner. Proceeding; contract will enforce.");
+      }
+    } catch {}
+    return { signer: ctxSigner };
+  }, [provider, owner, ctxSigner]);
 
   // --- Basic actions ---
   const onSetDailyLimit = useCallback(async () => {
@@ -506,7 +510,7 @@ export default function AdminDash() {
   const wBal = useMemo(() => { try { return ethers.formatUnits(balances.w || 0n, woneDec); } catch { return "0"; } }, [balances.w, woneDec]);
   const uBal = useMemo(() => { try { return ethers.formatUnits(balances.u || 0n, usdcDec); } catch { return "0"; } }, [balances.u, usdcDec]);
 
-  const notOwnerUI = !loadingOwner && !isOwner;
+  const notOwnerUI = !loadingOwner && account && owner && toLower(account) !== toLower(owner);
 
   return (
     <div className={styles.page}>
@@ -515,14 +519,20 @@ export default function AdminDash() {
         <div className={styles.containerWide}>
 
           {notice && <AdminAlert type={notice.type}>{notice.msg}</AdminAlert>}
+          {!ctxSigner && (
+            <AdminAlert type="info">
+              Not connected. <button className={styles.button} onClick={() => open({ view: 'Connect', namespace: 'eip155' })}>Connect Wallet</button>
+            </AdminAlert>
+          )}          
 
           {loadingOwner ? (
             <AdminAlert type="info">Loading owner and round info…</AdminAlert>
           ) : notOwnerUI ? (
             <AdminAlert type="warning">
-              This page is restricted to the contract owner.<br/>
+              Connected account differs from on-chain owner.<br/>
               <span className={styles.smallMuted}>Connected: {account || "—"}</span><br/>
-              <span className={styles.smallMuted}>Owner: {owner || "—"}</span>
+              <span className={styles.smallMuted}>Owner: {owner || "—"}</span><br/>
+              <span className={styles.smallMuted}>You may proceed — contract will enforce ownership on-chain.</span>
             </AdminAlert>
           ) : null}
 
@@ -557,10 +567,10 @@ export default function AdminDash() {
             <Section title="Daily Limit (USD)" right={null}>
               <div className={styles.field}>
                 <label className={styles.smallMuted}>New Limit (whole USD)</label>
-                <input className={styles.input} type="number" min={0} inputMode="numeric" placeholder="e.g. 100" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} disabled={!isOwner || busy.daily} />
+                <input className={styles.input} type="number" min={0} inputMode="numeric" placeholder="e.g. 100" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} disabled={busy.daily} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={cls(styles.button, styles.buttonAccent)} onClick={onSetDailyLimit} disabled={!isOwner || busy.daily}>{busy.daily ? "Updating…" : "Set Daily Limit"}</button>
+                <button type="button" className={cls(styles.button, styles.buttonAccent)} onClick={onSetDailyLimit} disabled={!canWrite || busy.daily}>{busy.daily ? "Updating…" : "Set Daily Limit"}</button>
               </div>
             </Section>
 
@@ -571,7 +581,7 @@ export default function AdminDash() {
                 <input type="checkbox" checked={locked} onChange={() => {}} disabled />
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onToggleLocked} disabled={!isOwner || busy.lock}>{busy.lock ? "Updating…" : locked ? "Unlock" : "Lock"}</button>
+                <button type="button" className={styles.button} onClick={onToggleLocked} disabled={!canWrite || busy.lock}>{busy.lock ? "Updating…" : locked ? "Unlock" : "Lock"}</button>
               </div>
             </Section>
 
@@ -579,10 +589,10 @@ export default function AdminDash() {
             <Section title="Start New Round" right={null}>
               <div className={styles.field}>
                 <label className={styles.smallMuted}>Round ID</label>
-                <input className={styles.input} type="number" min={0} inputMode="numeric" placeholder="e.g. 2" value={roundId} onChange={(e) => setRoundId(e.target.value)} disabled={!isOwner || busy.round} />
+                <input className={styles.input} type="number" min={0} inputMode="numeric" placeholder="e.g. 2" value={roundId} onChange={(e) => setRoundId(e.target.value)} disabled={busy.round} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onStartNewRound} disabled={!isOwner || busy.round}>{busy.round ? "Scheduling…" : "Start New Round"}</button>
+                <button type="button" className={styles.button} onClick={onStartNewRound} disabled={!canWrite || busy.round}>{busy.round ? "Scheduling…" : "Start New Round"}</button>
               </div>
             </Section>
           </section>
@@ -593,17 +603,17 @@ export default function AdminDash() {
             <Section title="Wallets (Dev / RMC)">
               <div className={styles.field}>
                 <label className={styles.smallMuted}>Dev Wallet</label>
-                <input className={styles.input} placeholder="0x..." value={devWallet} onChange={(e) => setDevWallet(e.target.value)} disabled={!isOwner || busy.dev} />
+                <input className={styles.input} placeholder="0x..." value={devWallet} onChange={(e) => setDevWallet(e.target.value)} disabled={busy.dev} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onSetDevWallet} disabled={!isOwner || busy.dev}>{busy.dev ? "Updating…" : "Set Dev Wallet"}</button>
+                <button type="button" className={styles.button} onClick={onSetDevWallet} disabled={!canWrite || busy.dev}>{busy.dev ? "Updating…" : "Set Dev Wallet"}</button>
               </div>
               <div className={styles.field}>
                 <label className={styles.smallMuted}>RMC Wallet</label>
-                <input className={styles.input} placeholder="0x..." value={rmcWallet} onChange={(e) => setRmcWallet(e.target.value)} disabled={!isOwner || busy.rmc} />
+                <input className={styles.input} placeholder="0x..." value={rmcWallet} onChange={(e) => setRmcWallet(e.target.value)} disabled={busy.rmc} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onSetRmcWallet} disabled={!isOwner || busy.rmc}>{busy.rmc ? "Updating…" : "Set RMC Wallet"}</button>
+                <button type="button" className={styles.button} onClick={onSetRmcWallet} disabled={!canWrite || busy.rmc}>{busy.rmc ? "Updating…" : "Set RMC Wallet"}</button>
               </div>
             </Section>
 
@@ -611,17 +621,17 @@ export default function AdminDash() {
             <Section title="Oracle & Merkle">
               <div className={styles.field}>
                 <label className={styles.smallMuted}>Oracle Address</label>
-                <input className={styles.input} placeholder="0x..." value={oracleAddr} onChange={(e) => setOracleAddr(e.target.value)} disabled={!isOwner || busy.oracle} />
+                <input className={styles.input} placeholder="0x..." value={oracleAddr} onChange={(e) => setOracleAddr(e.target.value)} disabled={busy.oracle} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onSetOracle} disabled={!isOwner || busy.oracle}>{busy.oracle ? "Updating…" : "Set Oracle"}</button>
+                <button type="button" className={styles.button} onClick={onSetOracle} disabled={!canWrite || busy.oracle}>{busy.oracle ? "Updating…" : "Set Oracle"}</button>
               </div>
               <div className={styles.field}>
                 <label className={styles.smallMuted}>Merkle Root (bytes32)</label>
-                <input className={styles.input} placeholder="0x...32bytes" value={merkleRoot} onChange={(e) => setMerkleRoot(e.target.value)} disabled={!isOwner || busy.merkle} />
+                <input className={styles.input} placeholder="0x...32bytes" value={merkleRoot} onChange={(e) => setMerkleRoot(e.target.value)} disabled={busy.merkle} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onSetMerkleRoot} disabled={!isOwner || busy.merkle}>{busy.merkle ? "Updating…" : "Set Merkle Root"}</button>
+                <button type="button" className={styles.button} onClick={onSetMerkleRoot} disabled={!canWrite || busy.merkle}>{busy.merkle ? "Updating…" : "Set Merkle Root"}</button>
               </div>
             </Section>
           </section>
@@ -631,14 +641,14 @@ export default function AdminDash() {
             <Section title="Transfer Ownership">
               <div className={styles.field}>
                 <label className={styles.smallMuted}>New Owner Address</label>
-                <input className={styles.input} placeholder="0x..." value={newOwner} onChange={(e) => setNewOwner(e.target.value)} disabled={!isOwner || busy.ownerXfer} />
+                <input className={styles.input} placeholder="0x..." value={newOwner} onChange={(e) => setNewOwner(e.target.value)} disabled={busy.ownerXfer} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={`${styles.button} ${styles.buttonWarn}`} onClick={onTransferOwnership} disabled={!isOwner || busy.ownerXfer}>
+                <button type="button" className={`${styles.button} ${styles.buttonWarn}`} onClick={onTransferOwnership} disabled={!canWrite || busy.ownerXfer}>
                   {busy.ownerXfer ? "Transferring…" : "Transfer Ownership"}
                 </button>
               </div>
-              <div className={styles.smallMuted}>Only the current owner can transfer. New owner must not be the zero address.</div>
+              <div className={styles.smallMuted}>Contract will enforce ownership. Zero address is not allowed.</div>
             </Section>
           </section>
 
@@ -647,7 +657,7 @@ export default function AdminDash() {
             <Section title="Supported Tokens">
               <div className={styles.field}>
                 <label className={styles.smallMuted}>Select token</label>
-                <select className={styles.select} value={tokenSel} onChange={(e) => setTokenSel(e.target.value)} disabled={!isOwner || busy.token || busy.tokenPrice}>
+                <select className={styles.select} value={tokenSel} onChange={(e) => setTokenSel(e.target.value)} disabled={busy.token || busy.tokenPrice}>
                   <option value="">—</option>
                   {supportedTokens.map((t) => (
                     <option key={t} value={t}>
@@ -658,25 +668,25 @@ export default function AdminDash() {
               </div>
               <div className={styles.field}>
                 <label className={styles.smallMuted}>Or type address</label>
-                <input className={styles.input} placeholder="0x..." value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} disabled={!isOwner || busy.token || busy.tokenPrice} />
+                <input className={styles.input} placeholder="0x..." value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} disabled={busy.token || busy.tokenPrice} />
               </div>
               <div className={styles.row}>
                 <label className={styles.smallMuted} style={{ marginRight: 12 }}>Allowed</label>
-                <input type="checkbox" checked={tokenAllowed} onChange={(e) => setTokenAllowed(e.target.checked)} disabled={!isOwner || busy.token || busy.tokenPrice} />
+                <input type="checkbox" checked={tokenAllowed} onChange={(e) => setTokenAllowed(e.target.checked)} disabled={busy.token || busy.tokenPrice} />
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onUpdateSupportedToken} disabled={!isOwner || busy.token}>{busy.token ? "Updating…" : "Update Supported Token"}</button>
+                <button type="button" className={styles.button} onClick={onUpdateSupportedToken} disabled={!canWrite || busy.token}>{busy.token ? "Updating…" : "Update Supported Token"}</button>
               </div>
 
               <div className={styles.contractFundsSep} />
 
               <div className={styles.field}>
                 <label className={styles.smallMuted}>Fixed Price (USD)</label>
-                <input className={styles.input} type="number" step="any" inputMode="decimal" placeholder="e.g. 1.00 (0 to clear)" value={fixedPrice} onChange={(e) => setFixedPrice(e.target.value)} disabled={!isOwner || busy.tokenPrice} />
+                <input className={styles.input} type="number" step="any" inputMode="decimal" placeholder="e.g. 1.00 (0 to clear)" value={fixedPrice} onChange={(e) => setFixedPrice(e.target.value)} disabled={busy.tokenPrice} />
                 <div className={styles.smallMuted}>Stored on-chain as 18 decimals. Applies only to tokens where fixed pricing is used.</div>
               </div>
               <div className={styles.row}>
-                <button type="button" className={styles.button} onClick={onSetFixedUsdPrice} disabled={!isOwner || busy.tokenPrice || !(tokenSel || tokenInput)}>{busy.tokenPrice ? "Saving…" : "Set Fixed USD Price"}</button>
+                <button type="button" className={styles.button} onClick={onSetFixedUsdPrice} disabled={!canWrite || busy.tokenPrice || !(tokenSel || tokenInput)}>{busy.tokenPrice ? "Saving…" : "Set Fixed USD Price"}</button>
               </div>
             </Section>
 
@@ -687,21 +697,21 @@ export default function AdminDash() {
                 {feeThresholds.map((th, i) => (
                   <div key={i} className={styles.row}>
                     <span className={styles.contractFundsLabel} style={{ width: 100 }}>≤ Threshold {i+1}</span>
-                    <input className={styles.input} style={{ maxWidth: 120 }} value={th} onChange={(e) => setFeeThresholds((arr) => arr.map((v, idx) => idx === i ? e.target.value : v))} disabled={!isOwner || busy.fee} />
+                    <input className={styles.input} style={{ maxWidth: 120 }} value={th} onChange={(e) => setFeeThresholds((arr) => arr.map((v, idx) => idx === i ? e.target.value : v))} disabled={busy.fee} />
                     <span className={styles.contractFundsLabel} style={{ width: 100 }}>BPS {i+1}</span>
-                    <input className={styles.input} style={{ maxWidth: 120 }} value={feeBps[i] || ""} onChange={(e) => setFeeBps((arr) => arr.map((v, idx) => idx === i ? e.target.value : v))} disabled={!isOwner || busy.fee} />
-                    <button type="button" className={styles.button} onClick={() => { setFeeThresholds((arr) => arr.filter((_, idx) => idx !== i)); setFeeBps((arr) => arr.filter((_, idx) => idx !== i)); }} disabled={!isOwner || busy.fee}>Remove</button>
+                    <input className={styles.input} style={{ maxWidth: 120 }} value={feeBps[i] || ""} onChange={(e) => setFeeBps((arr) => arr.map((v, idx) => idx === i ? e.target.value : v))} disabled={busy.fee} />
+                    <button type="button" className={styles.button} onClick={() => { setFeeThresholds((arr) => arr.filter((_, idx) => idx !== i)); setFeeBps((arr) => arr.filter((_, idx) => idx !== i)); }} disabled={busy.fee}>Remove</button>
                   </div>
                 ))}
                 {/* Last BPS (default) */}
                 <div className={styles.row}>
                   <span className={styles.contractFundsLabel} style={{ width: 120 }}>Default BPS</span>
-                  <input className={styles.input} style={{ maxWidth: 120 }} value={feeBps[feeThresholds.length] || ""} onChange={(e) => setFeeBps((arr) => { const copy = [...arr]; copy[feeThresholds.length] = e.target.value; return copy; })} disabled={!isOwner || busy.fee} />
-                  <button type="button" className={styles.button} onClick={() => { setFeeThresholds((arr) => [...arr, "0"]); setFeeBps((arr) => [...arr, "0"]); }} disabled={!isOwner || busy.fee}>Add Row</button>
+                  <input className={styles.input} style={{ maxWidth: 120 }} value={feeBps[feeThresholds.length] || ""} onChange={(e) => setFeeBps((arr) => { const copy = [...arr]; copy[feeThresholds.length] = e.target.value; return copy; })} disabled={busy.fee} />
+                  <button type="button" className={styles.button} onClick={() => { setFeeThresholds((arr) => [...arr, "0"]); setFeeBps((arr) => [...arr, "0"]); }} disabled={busy.fee}>Add Row</button>
                 </div>
               </div>
               <div className={styles.row}>
-                <button type="button" className={cls(styles.button, styles.buttonAccent)} onClick={onSaveFeeTiers} disabled={!isOwner || busy.fee}>{busy.fee ? "Saving…" : "Save Fee Tiers"}</button>
+                <button type="button" className={cls(styles.button, styles.buttonAccent)} onClick={onSaveFeeTiers} disabled={!canWrite || busy.fee}>{busy.fee ? "Saving…" : "Save Fee Tiers"}</button>
               </div>
             </Section>
           </section>
@@ -711,12 +721,12 @@ export default function AdminDash() {
             <Section title="Withdraw Funds">
               <div className={styles.row}>
                 <label className={styles.smallMuted} style={{ width: 120 }}>Token</label>
-                <select className={styles.select} style={{ maxWidth: 380 }} value={tokenSel} onChange={(e) => setTokenSel(e.target.value)} disabled={!isOwner || busy.wd}>
+                <select className={styles.select} style={{ maxWidth: 380 }} value={tokenSel} onChange={(e) => setTokenSel(e.target.value)} disabled={busy.wd}>
                   <option value="">—</option>
                   {wone && <option value={wone}>wONE ({fmt(wBal)})</option>}
                   {usdc && <option value={usdc}>USDC ({fmt(uBal)})</option>}
                 </select>
-                <button type="button" className={styles.button} onClick={onWithdrawFunds} disabled={!isOwner || busy.wd || !tokenSel}>{busy.wd ? "Withdrawing…" : "Withdraw"}</button>
+                <button type="button" className={styles.button} onClick={onWithdrawFunds} disabled={!canWrite || busy.wd || !tokenSel}>{busy.wd ? "Withdrawing…" : "Withdraw"}</button>
               </div>
             </Section>
           </section>

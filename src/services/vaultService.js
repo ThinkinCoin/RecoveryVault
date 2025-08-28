@@ -13,11 +13,11 @@ import {
 // ==========================
 // Core
 // ==========================
-
 const RPC_URL = import.meta.env.VITE_RPC_URL;
 const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
 export const VAULT_ADDRESS = import.meta.env.VITE_VAULT_ADDRESS;
 const VAULT_ABI = VaultArtifact.abi ?? VaultArtifact;
+const DEV = !!import.meta.env?.DEV;
 
 function req(v, msg) {
   if (!v) throw new Error(msg);
@@ -38,7 +38,7 @@ export async function getReadContract(readProvider) {
   const addr = getVaultAddress();
   const net = await readProvider.getNetwork();
   if (Number(net.chainId) !== CHAIN_ID) {
-    console.warn(`[vaultService] Unexpected chainId ${net.chainId}; expected ${CHAIN_ID}`);
+    if (DEV) console.warn(`[vaultService] Unexpected chainId ${net.chainId}; expected ${CHAIN_ID}`);
   }
   const code = await readProvider.getCode(addr);
   if (!code || code === "0x") throw new Error(`[vaultService] ${addr} has no bytecode`);
@@ -51,35 +51,30 @@ export async function getWriteContract(signer) {
   return new Contract(addr, VAULT_ABI, signer);
 }
 
+// ==========================
 // Helpers
+// ==========================
 function b(v) { return BigInt(v); }
 function n(v) { return Number(v); }
 function bool(v) { return Boolean(v); }
 export function normalizeAddress(addr) { try { return getAddress(addr); } catch { return null; } }
+function addrEq(a, b) { return String(a||"").toLowerCase() === String(b||"").toLowerCase(); }
+function isZeroBytes32(x) { return !x || /^0x0{64}$/i.test(String(x)); }
 function isDecode0x(err) {
   const msg = String(err?.message || err || "");
-  return (
-    err?.code === "BAD_DATA" ||
-    /could not decode result data/i.test(msg) ||
-    /value="?0x"?/i.test(msg)
-  );
+  return err?.code === "BAD_DATA" || /could not decode result data/i.test(msg) || /value="?0x"?/i.test(msg);
 }
-function addrEq(a, b) {
-  return String(a || "").toLowerCase() === String(b || "").toLowerCase();
-}
-function isZeroBytes32(x) {
-  return !x || /^0x0{64}$/i.test(String(x));
-}
-// Minimal ERC20
+
+// Minimal ERC20 (inclui decimals!)
 const ERC20_ABI = [
   "function balanceOf(address) view returns (uint256)",
   "function allowance(address owner, address spender) view returns (uint256)",
+  "function decimals() view returns (uint8)",
 ];
 
 // ==========================
 // Info (Read-only)
 // ==========================
-
 export async function owner(p){ return await (await getReadContract(p)).owner(); }
 export async function oracle(p){ return await (await getReadContract(p)).oracle(); }
 export async function devWallet(p){ return await (await getReadContract(p)).devWallet(); }
@@ -113,7 +108,7 @@ export async function getSupportedTokens(p){ return await (await getReadContract
 
 export async function getUserLimit(p, wallet){
   const r = await (await getReadContract(p)).getUserLimit(wallet);
-  return { remainingUSD: b(r) };
+  return { remainingUSD: b(r) }; // USD inteiros
 }
 
 export async function getVaultBalances(p){
@@ -130,7 +125,7 @@ export async function getRoundInfo(p){
   return { roundId: b(r[0]), startTime: b(r[1]), isActive: bool(r[2]), paused: bool(r[3]), limitUsd: b(r[4]) };
 }
 
-// Aggregated vault status
+// Agregado
 export async function getVaultStatus(p) {
   const v = await getReadContract(p);
   const [ri, locked, balances, feeTiers] = await Promise.all([
@@ -153,22 +148,25 @@ export async function getVaultStatus(p) {
   };
 }
 
-// Quote
+// ==========================
+// Quote (novo mapeamento)
+// ==========================
 export async function quoteRedeem(p, user, tokenIn, amountIn, redeemIn, proof = []) {
   const v = await getReadContract(p);
   const r = await v.quoteRedeem(user, tokenIn, amountIn, redeemIn, proof ?? []);
   return {
-    whitelisted: bool(r[0]),
-    roundIsActive: bool(r[1]),
-    feeAmount: b(r[2]),
-    refundAmount: b(r[3]),
-    userLimitUsdBefore: b(r[4]),
-    userLimitUsdAfter: b(r[5]),
-    usdValue: b(r[6]),
-    tokenInDecimals: n(r[7]),
-    redeemInDecimals: n(r[8]),
-    oraclePrice: b(r[9]),
-    oracleDecimals: n(r[10]),
+    whitelisted:        bool(r[0]),
+    roundIsActive:      bool(r[1]),
+    feeAmountInTokenIn: b(r[2]),
+    burnAmountInTokenIn:b(r[3]),
+    userLimitUsdBefore: b(r[4]), // USD inteiros
+    userLimitUsdAfter:  b(r[5]),
+    usdValueIn:         b(r[6]), // USD inteiros
+    tokenInDecimals:    n(r[7]),
+    redeemInDecimals:   n(r[8]),
+    oraclePrice:        b(r[9]),
+    oracleDecimals:     n(r[10]),
+    amountOutRedeemToken: b(r[11]),
   };
 }
 
@@ -207,7 +205,6 @@ export async function getAllFixedPrices(p, tokens) {
 // ==========================
 // Admin (Write)
 // ==========================
-
 export async function redeem(signer, tokenIn, amountIn, redeemIn, proof = [], overrides = {}) {
   const v = await getWriteContract(signer);
   if (!Array.isArray(proof)) proof = [];
@@ -232,7 +229,6 @@ export async function withdrawFunds(signer, token){ return await (await getWrite
 // ==========================
 // Utils
 // ==========================
-
 export async function wrapNativeToWONE(signer, amount) {
   const provider = signer.provider;
   const v = await getReadContract(provider);
@@ -257,10 +253,10 @@ export function getEventTopics() {
 // ==========================
 // Redeem – simulate-first & robust send
 // ==========================
-
 /**
- * Preflight de leitura: valida regras de negócio usando view calls,
- * e retorna motivos amigáveis antes da simulação/tx.
+ * Preflight de leitura: valida regras de negócio com views.
+ * Usa quoteRedeem quando possível. Fallback cobre wONE/usdc/fixedUsdPrice
+ * e também estima amountOut + liquidez.
  */
 export async function preflightReadChecks(vault, provider, ctx) {
   try {
@@ -303,76 +299,150 @@ export async function preflightReadChecks(vault, provider, ctx) {
       return { ok: false, reason: `Round delay in effect. Try again in ~${mins} min` };
     }
 
-    // Whitelist obrigatória se root != 0
+    // Whitelist (se root ≠ 0)
     if (!isZeroBytes32(root)) {
       const hasProof = Array.isArray(proof) && proof.length > 0;
-      if (!hasProof) {
-        return { ok: false, reason: "Address not whitelisted (missing proof)" };
-      }
+      if (!hasProof) return { ok: false, reason: "Address not whitelisted (missing proof)" };
     }
 
-    // Tente usar quoteRedeem (se existir). Se vier 0x/BAD_DATA, fazemos fallback.
+    // Tenta quoteRedeem (novo layout + checagem de liquidez pelo amountOut)
     if (typeof vault.quoteRedeem === "function") {
       try {
         const q = await vault.quoteRedeem(user, tokenIn, amountIn, redeemIn, Array.isArray(proof) ? proof : []);
         const whitelisted     = Boolean(q[0]);
         const roundIsActive   = Boolean(q[1]);
-        const userLimitBefore = BigInt(q[4]);
-        const usdValue        = BigInt(q[6]);
-        if (!isZeroBytes32(root) && !whitelisted) {
-          return { ok: false, reason: "Address not whitelisted (invalid or wrong proof)" };
-        }
+        const userLimitBefore = BigInt(q[4]); // USD inteiros
+        const usdValueIn      = BigInt(q[6]); // USD inteiros
+        const amountOut       = BigInt(q[11]);
+
+        if (!isZeroBytes32(root) && !whitelisted) return { ok: false, reason: "Address not whitelisted (invalid or wrong proof)" };
         if (!roundIsActive) return { ok: false, reason: "Round is not active" };
-        if (usdValue === 0n) return { ok: false, reason: "Price unavailable for selected token" };
-        if (userLimitBefore < usdValue) {
-          return { ok: false, reason: "Insufficient remaining daily limit" };
-        }
-        // tudo certo com quote
+        if (usdValueIn === 0n) return { ok: false, reason: "Price unavailable for selected token" };
+        if (userLimitBefore < usdValueIn) return { ok: false, reason: "Insufficient remaining daily limit" };
+
+        // Liquidez usando getVaultBalances e o amountOut cotado
+        try {
+          const bals = await vault.getVaultBalances();
+          const woneBal = BigInt(bals[0]);
+          const usdcBal = BigInt(bals[1]);
+          if (addrEq(redeemIn, usdcAddr) && usdcBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
+          if (addrEq(redeemIn, woneAddr) && woneBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
+        } catch { /* não bloqueia se leitura falhar */ }
+
         return { ok: true };
       } catch (err) {
         if (!isDecode0x(err)) {
-          // erro real com motivo decodificável
           const reason = extractRpcRevert(err, vault.interface);
           return { ok: false, reason: reason || "quote failed" };
         }
-        console.warn("[vaultService] quoteRedeem returned 0x/BAD_DATA; using fallback checks");
-        // segue para fallback abaixo
+        if (DEV) console.warn("[vaultService] quoteRedeem returned 0x/BAD_DATA; using fallback checks");
       }
-    } else {
+    } else if (DEV) {
       console.warn("[vaultService] quoteRedeem missing on-chain; using fallback checks");
     }
 
-    // ---------- FALLBACK (sem quoteRedeem) ----------
-    // Exigir preço on-chain para o token de entrada
-    const price18 = BigInt(await vault.fixedUsdPrice(tokenIn).catch(() => 0n));
-    if (price18 === 0n) {
-      return { ok: false, reason: "Price unavailable for selected token" };
-    }
-    // USD da entrada (18d)
-    const usdValue = (BigInt(amountIn) * price18) / 10n**18n;
+    // ---------- FALLBACK ----------
+    // Funções auxiliares para fallback
+    const one = 10n ** 18n;
 
-    // Limite diário do usuário
-    try {
-      const rem = await vault.getUserLimit(user).catch(() => null);
-      const remainingUSD = rem ? BigInt(rem) : null;
-      if (remainingUSD !== null && remainingUSD < usdValue) {
-        return { ok: false, reason: "Insufficient remaining daily limit" };
+    async function tokenDecimals(addr) {
+      try {
+        const erc = new Contract(addr, ERC20_ABI, provider);
+        return BigInt(await erc.decimals());
+      } catch {
+        return 18n;
       }
-    } catch {/* ignora se função ausente */}
+    }
 
-    // Liquidez do cofre (checagens leves)
+    async function usdValueInt(token, amount) {
+      if (addrEq(token, woneAddr)) {
+        const dec = await tokenDecimals(token);
+        const or  = await (async () => {
+          const oAddr = await vault.oracle();
+          const oc = new Contract(oAddr, IOracleABI.abi ?? IOracleABI, provider);
+          const r = await oc.latestPrice();
+          return { price: BigInt(r[0]), decs: BigInt(r[1]) };
+        })();
+        if (or.price <= 0n) throw new Error("Invalid oracle");
+        const amount1e18 = (BigInt(amount) * one) / (10n ** dec);
+        // ((amount1e18 * price) / 10**oracleDec) / 1e18 => USD inteiro
+        return ((amount1e18 * or.price) / (10n ** or.decs)) / one;
+      } else if (addrEq(token, usdcAddr)) {
+        const udec = await tokenDecimals(usdcAddr);
+        return BigInt(amount) / (10n ** udec);
+      } else {
+        const px18 = BigInt(await vault.fixedUsdPrice(token).catch(() => 0n));
+        if (px18 === 0n) throw new Error("Price unavailable for selected token");
+        const dec = await tokenDecimals(token);
+        // (amount * price18) / 10**dec / 1e18
+        return (BigInt(amount) * px18) / (10n ** dec) / one;
+      }
+    }
+
+    async function priceOut18(token) {
+      if (addrEq(token, usdcAddr)) return one; // $1
+      if (addrEq(token, woneAddr)) {
+        const oAddr = await vault.oracle();
+        const oc = new Contract(oAddr, IOracleABI.abi ?? IOracleABI, provider);
+        const r = await oc.latestPrice();
+        const p = BigInt(r[0]); const d = BigInt(r[1]);
+        if (p <= 0n) throw new Error("Invalid oracle");
+        return (p * one) / (10n ** d);
+      }
+      throw new Error("Unsupported redeem token");
+    }
+
+    function calcFeeTokenIn(amountInBN, usdInt, thresholdsBN, bpsArr) {
+      // thresholds e usdInt são inteiros em USD
+      for (let i = 0; i < thresholdsBN.length; i++) {
+        if (usdInt <= thresholdsBN[i]) {
+          return (amountInBN * BigInt(bpsArr[i])) / 10000n;
+        }
+      }
+      return (amountInBN * BigInt(bpsArr[bpsArr.length - 1])) / 10000n;
+    }
+
+    // 1) USD inteiro do input
+    const usdIn = await usdValueInt(tokenIn, amountIn);
+
+    // 2) Limite diário (já em USD inteiro)
+    try {
+      const remaining = BigInt(await vault.getUserLimit(user));
+      if (usdIn > remaining) return { ok: false, reason: "Insufficient remaining daily limit" };
+    } catch { /* sem bloquear se falhar */ }
+
+    // 3) Fee tiers -> fee em tokenIn, netIn, usdNet
+    let feeTokenIn = 0n;
+    try {
+      const ft = await vault.getFeeTiers();
+      const thresholdsBN = ft[0].map((x) => BigInt(x));
+      const bpsArr = ft[1].map((x) => Number(x));
+      feeTokenIn = calcFeeTokenIn(BigInt(amountIn), BigInt(usdIn), thresholdsBN, bpsArr);
+    } catch {
+      // fallback tier final (10 bps = 0.1%) para não travar; NÃO bloqueia
+      feeTokenIn = (BigInt(amountIn) * 10n) / 10000n;
+    }
+    const netIn = BigInt(amountIn) - feeTokenIn;
+    const usdNet = await usdValueInt(tokenIn, netIn);
+
+    // 4) amountOut e liquidez
+    const redeemDec = await (async () => {
+      try {
+        const erc = new Contract(redeemIn, ERC20_ABI, provider);
+        return BigInt(await erc.decimals());
+      } catch { return 18n; }
+    })();
+    const pOut18 = await priceOut18(redeemIn);
+    // amountOut = (usdNet * 1e18 * 10**redeemDec) / pOut18
+    const amountOut = (usdNet * one * (10n ** redeemDec)) / pOut18;
+
     try {
       const bals = await vault.getVaultBalances();
       const woneBal = BigInt(bals[0]);
       const usdcBal = BigInt(bals[1]);
-
-      if (addrEq(redeemIn, usdcAddr)) {
-        // Para USDC, um sanity check simples: precisa haver algum saldo
-        if (usdcBal === 0n) return { ok: false, reason: "Vault has no USDC available" };
-      } else if (addrEq(redeemIn, woneAddr)) {
-        if (woneBal === 0n) return { ok: false, reason: "Vault has no wONE available" };
-      }
-    } catch {/* sem bloqueio duro se não conseguir ler */}
+      if (addrEq(redeemIn, usdcAddr) && usdcBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
+      if (addrEq(redeemIn, woneAddr) && woneBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
+    } catch { /* não bloqueia se falhar */ }
 
     return { ok: true, note: "fallback" };
   } catch (err) {
@@ -380,10 +450,8 @@ export async function preflightReadChecks(vault, provider, ctx) {
   }
 }
 
-
 /**
- * Simulação de redeem: roda preflight, faz eth_call com value=0
- * e não tenta decodificar retorno (função não tem outputs).
+ * Simulação (eth_call)
  */
 export async function preflightRedeem(readProvider, { fn, args, context }) {
   const vault = await getReadContract(readProvider);
@@ -414,20 +482,42 @@ export async function preflightRedeem(readProvider, { fn, args, context }) {
 }
 
 /**
- * Envia a transação após simulação aprovada.
- * Suporta EIP-1559/legacy e para limpo em ACTION_REJECTED (4001).
+ * Envio da tx (com fallbacks de gas e estimate)
  */
 export async function submitRedeem(signerContract, { fn, args }, opts = {}) {
   try {
     const vault = await getWriteContract(signerContract);
     const provider = signerContract?.provider;
 
-    const feeOverrides = await buildGasFees(provider);
+    // Fees: tenta EIP-1559; se não houver, cai para gasPrice
+    let feeOverrides = {};
+    try {
+      feeOverrides = await buildGasFees(provider);
+    } catch {
+      try {
+        const gasPrice = await provider.getGasPrice();
+        if (gasPrice) feeOverrides = { gasPrice };
+      } catch { /* ignore */ }
+    }
 
-    const gasLimit = await safeEstimateGas(vault, fn, args, {
-      fallback: opts.fallbackGas ?? 300000n,
-      overrides: { value: 0n },
-    });
+    // Estimate: safeEstimateGas espera o NOME ("redeem"), não a assinatura
+    let gasLimit;
+    try {
+      const iface = new Interface(VAULT_ABI);
+      const fnName = iface.getFunction(fn).name; // "redeem"
+      gasLimit = await safeEstimateGas(vault, fnName, args, {
+        fallback: opts.fallbackGas ?? 300000n,
+        overrides: { value: 0n, ...feeOverrides },
+      });
+    } catch {
+      // Fallback direto no estimateGas da assinatura
+      try {
+        const estimator = vault.estimateGas.getFunction(fn);
+        gasLimit = await estimator(...args, { value: 0n, ...feeOverrides });
+      } catch {
+        gasLimit = opts.fallbackGas ?? 300000n;
+      }
+    }
 
     const overrides = {
       ...feeOverrides,
@@ -453,8 +543,7 @@ export async function submitRedeem(signerContract, { fn, args }, opts = {}) {
 }
 
 /**
- * Fluxo completo para uma assinatura específica (simulate → send).
- * Para imediatamente se o usuário rejeitar.
+ * Variante única (simulate → send)
  */
 export async function redeemVariantFlow({
   signer,
@@ -473,9 +562,7 @@ export async function redeemVariantFlow({
     context: { user, tokenIn, amountIn, redeemIn, proof },
   });
 
-  if (!sim.ok) {
-    return { ok: false, stage: "simulate", reason: sim.reason };
-  }
+  if (!sim.ok) return { ok: false, stage: "simulate", reason: sim.reason };
 
   const sent = await submitRedeem(signer, { fn, args });
   if (!sent.ok) {

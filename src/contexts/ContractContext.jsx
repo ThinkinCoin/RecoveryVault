@@ -1,105 +1,109 @@
-// src/contexts/ContractContext.jsx
+// ContractContext bound to Reown AppKit provider (WalletConnect) + ethers v6
+// - Single-chain: Harmony (from env)
+// - Never touches window.ethereum (prevents MetaMask from hijacking flow)
+// - Connect/Disconnect routed through AppKit modal
+// - English-only logs
+
 import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { BrowserProvider, JsonRpcProvider } from "ethers";
+import { useAppKitProvider, useAppKitAccount, useAppKit, useDisconnect } from "@reown/appkit/react";
+
+const HARMONY_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
+const RPC_URL =
+  import.meta.env.VITE_RPC_URL_HARMONY ??
+  import.meta.env.VITE_RPC_URL ??
+  "";
 
 const ContractContext = createContext({
   provider: null,
   signer: null,
   account: null,
-  chainId: null,
+  chainId: HARMONY_CHAIN_ID,
   connect: async () => {},
   disconnect: () => {}
 });
 
 export const useContractContext = () => useContext(ContractContext);
-  // ✅ Alias para compatibilidade com componentes antigos
-  
 
-// ✅ e exporte o provider (se ainda não tiver)
 export function ContractProvider({ children }) {
-  const [provider, setProvider] = useState(null);
+  // IMPORTANT: namespace hooks to EVM (eip155)
+  const { walletProvider } = useAppKitProvider("eip155"); // EIP-1193 from AppKit (WC, multisig, etc.)
+  const { isConnected, address } = useAppKitAccount({ namespace: "eip155" }); // Account state from AppKit
+  const { open } = useAppKit();                           // Controls the AppKit modal
+  const { disconnect: wcDisconnect } = useDisconnect();   // AppKit-aware disconnect
+
   const [signer, setSigner] = useState(null);
-  const [account, setAccount] = useState(null);
-  const [chainId, setChainId] = useState(null);
 
-  // pick provider: injected (BrowserProvider) or fallback RPC
-  useEffect(() => {
-    const rpcUrl = import.meta.env.VITE_RPC_URL_HARMONY;
-    const fallback = rpcUrl ? new JsonRpcProvider(rpcUrl, Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000)) : null;
+  // Only allow signing when AppKit delivered a walletProvider AND we are connected
+  const canSign = useMemo(() => Boolean(walletProvider && isConnected), [walletProvider, isConnected]);
 
-    if (typeof window !== "undefined" && window.ethereum) {
-      const injected = new BrowserProvider(window.ethereum);
-      setProvider(injected);
-      (async () => {
-        try {
-          const net = await injected.getNetwork();
-          setChainId(Number(net.chainId));
-        } catch (e) {
-          console.error("[ContractContext] getNetwork error:", e);
-        }
-      })();
-    } else if (fallback) {
-      setProvider(fallback);
-      (async () => {
-        try {
-          const net = await fallback.getNetwork();
-          setChainId(Number(net.chainId));
-        } catch (e) {
-          console.error("[ContractContext] fallback getNetwork error:", e);
-        }
-      })();
-    } else {
-      console.error("[ContractContext] No provider available (no window.ethereum and no VITE_RPC_URL_HARMONY).");
+  // Build read/write provider:
+  // - If connected via AppKit: Wrap AppKit's walletProvider with ethers BrowserProvider (writes)
+  // - Else: use public RPC as JsonRpcProvider (reads)
+  const provider = useMemo(() => {
+    try {
+      if (canSign) {
+        return new BrowserProvider(walletProvider);
+      }
+      if (RPC_URL) {
+        return new JsonRpcProvider(RPC_URL, HARMONY_CHAIN_ID);
+      }
+      console.error("[ContractContext] Missing RPC_URL for fallback provider.");
+      return null;
+    } catch (e) {
+      console.error("[ContractContext] Provider init error:", e);
+      return null;
     }
-  }, []);
+  }, [walletProvider, canSign]);
 
+  // Keep signer in sync with walletProvider (avoid getSigner() on JsonRpcProvider)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!canSign || !walletProvider) {
+        setSigner(null);
+        return;
+      }
+      try {
+        const writable = new BrowserProvider(walletProvider);
+        const s = await writable.getSigner();
+        if (!cancelled) setSigner(s);
+      } catch (e) {
+        console.error("[ContractContext] getSigner error:", e);
+        if (!cancelled) setSigner(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [walletProvider, canSign]);
+
+  // AppKit-based connect (opens modal in EVM namespace)
   const connect = useCallback(async () => {
     try {
-      if (!provider || !("send" in provider)) {
-        console.warn("[ContractContext] connect: provider not injectable, skipping requestAccounts.");
-      } else {
-        await provider.send("eth_requestAccounts", []);
-      }
-      const _signer = await provider.getSigner();
-      const addr = await _signer.getAddress();
-      setSigner(_signer);
-      setAccount(addr);
+      await open({ view: "Connect", namespace: "eip155" });
     } catch (e) {
       console.error("[ContractContext] connect error:", e);
     }
-  }, [provider]);
+  }, [open]);
 
+  // AppKit-based disconnect
   const disconnect = useCallback(() => {
-    setSigner(null);
-    setAccount(null);
-  }, []);
-
-  // handle account / chain changes (if injected)
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.ethereum) return;
-    const eth = window.ethereum;
-
-    const onAccounts = (accs) => {
-      const a = Array.isArray(accs) && accs.length ? accs[0] : null;
-      setAccount(a);
-      setSigner(null); // force refresh signer on next connect
-    };
-    const onChain = (hexId) => {
-      try { setChainId(parseInt(hexId, 16)); } catch { setChainId(null); }
+    try {
+      wcDisconnect();
+    } catch (e) {
+      console.error("[ContractContext] disconnect error:", e);
+    } finally {
       setSigner(null);
-    };
-
-    eth.on?.("accountsChanged", onAccounts);
-    eth.on?.("chainChanged", onChain);
-    return () => {
-      eth.removeListener?.("accountsChanged", onAccounts);
-      eth.removeListener?.("chainChanged", onChain);
-    };
-  }, []);
+    }
+  }, [wcDisconnect]);
 
   const value = useMemo(() => ({
-    provider, signer, account, chainId, connect, disconnect
-  }), [provider, signer, account, chainId, connect, disconnect]);
+    provider,
+    signer,
+    account: address || null,
+    chainId: HARMONY_CHAIN_ID, // single-chain locked by AppKit config
+    connect,
+    disconnect
+  }), [provider, signer, address, connect, disconnect]);
 
   return <ContractContext.Provider value={value}>{children}</ContractContext.Provider>;
 }
