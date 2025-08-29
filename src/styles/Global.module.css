@@ -257,15 +257,38 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 
 /* ===== Buttons ===== */
 .button{
-  display:inline-flex; align-items:center; justify-content:center; gap:6px;
-  padding:8px 12px; border-radius:10px; cursor:pointer; -webkit-user-select:none;user-select:none; 
-  background:var(--foreground); color:var(--text-primary); border:1px solid rgba(255,255,255,0.08);
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:6px;
+  padding:8px 12px;
+  border-radius:10px;
+  cursor:pointer;
+  /* Cross-browser user-select fix */
+  -webkit-user-select:none; /* Safari/Chrome */
+  -moz-user-select:none;    /* Firefox */
+  -ms-user-select:none;     /* IE/Edge legacy */
+  user-select:none;         /* Standard */
+  background:var(--foreground);
+  color:var(--text-primary);
+  border:1px solid rgba(255,255,255,0.08);
   transition:background .15s ease, border-color .15s ease, transform .02s ease-in-out;
   touch-action:manipulation;
 }
 .buttonConfirm{width: 80%; padding: 15px;}
 .buttonIcon{ width:36px; height:36px; padding:0; }
-.ButtonIconClean{ padding:2px 10px; background:none; border:0; color:var(--text-primary); cursor:pointer; -webkit-user-select: none; user-select:none; }
+.ButtonIconClean{
+  padding:2px 10px;
+  background:none;
+  border:0;
+  color:var(--text-primary);
+  cursor:pointer;
+  /* Cross-browser user-select fix */
+  -webkit-user-select:none;
+  -moz-user-select:none;
+  -ms-user-select:none;
+  user-select:none;
+}
 .button:hover{ background:#15233c; color:var(--primary); }
 .button:active{ transform:translateY(1px); }
 .buttonBlock{ width:100%; }
