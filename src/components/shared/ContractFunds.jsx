@@ -2,10 +2,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { useOnePrice } from "@/hooks/useOnePrice";
-import { getVaultStatus } from "@/services/vaultService"; 
+import { getVaultStatus, getFeeTiers } from "@/services/vaultService";
 import { ethers } from "ethers";
 
-// Format helpers
+// ---------- Format helpers ----------
 function formatUSD(value) {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n)) return "$0.00";
@@ -28,6 +28,57 @@ function formatAmount(val, maxFractionDigits = 6) {
   const mfd = clamp(maxFractionDigits, 0, 20);
   if (!Number.isFinite(n)) return "0";
   return n.toLocaleString(undefined, { maximumFractionDigits: mfd });
+}
+
+// Compute active fee tier in "cap mode":
+// thresholds = [cap1, cap2, cap3] USD integers (ascending or not)
+// rule: pick the first threshold >= netUsd; if none, pick the last
+function computeActiveTierCapMode(netUsd, thresholds = [], bps = []) {
+  if (!Array.isArray(thresholds) || !Array.isArray(bps)) return { tier: null, pctText: null };
+  if (thresholds.length === 0 || bps.length === 0) return { tier: null, pctText: null };
+
+  // Normalize and sort by threshold ASC
+  const pairs = thresholds
+    .map((t, i) => ({ t: Number(t), b: Number(bps[i] ?? 0) }))
+    .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.b))
+    .sort((a, b) => a.t - b.t);
+
+  if (pairs.length === 0) return { tier: null, pctText: null };
+
+  // Cap-mode: first cap >= netUsd; else last
+  let idx = pairs.findIndex((p) => netUsd <= p.t);
+  if (idx === -1) idx = pairs.length - 1;
+
+  const tierNumber = idx + 1; // 1-based
+  const pctText = `${(pairs[idx].b / 100).toFixed(2)}%`; // bps → %
+  return { tier: tierNumber, pctText };
+}
+
+
+// Compute active tier given netUsd and tiers arrays
+function computeActiveTier(netUsd, thresholds = [], bps = []) {
+  if (!Array.isArray(thresholds) || !Array.isArray(bps)) return { tier: null, pctText: null };
+  if (thresholds.length === 0 || bps.length === 0) return { tier: null, pctText: null };
+
+  // Pair and sort by threshold ASC to avoid ordering issues
+  const pairs = thresholds
+    .map((t, i) => ({ t: Number(t), b: Number(bps[i] ?? 0) }))
+    .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.b))
+    .sort((a, b) => a.t - b.t);
+
+  if (pairs.length === 0) return { tier: null, pctText: null };
+
+  let activeIndex = null;
+  for (let i = 0; i < pairs.length; i++) {
+    if (netUsd >= pairs[i].t) {
+      activeIndex = i; // keep highest match
+    }
+  }
+  if (activeIndex === null) return { tier: null, pctText: null };
+
+  const tierNumber = activeIndex + 1; // 1-based
+  const pctText = `${(pairs[activeIndex].b / 100).toFixed(2)}%`; // bps -> %
+  return { tier: tierNumber, pctText };
 }
 
 export default function ContractFunds() {
@@ -88,6 +139,8 @@ export default function ContractFunds() {
 
       // Read-only provider for contract reads
       const provider = new ethers.BrowserProvider(window.ethereum);
+
+      // 1) Get current balances and base status
       const status = await getVaultStatus(provider);
       if (!isMountedRef.current) return;
 
@@ -101,24 +154,36 @@ export default function ContractFunds() {
       const totalUsd = u + w * oneUsd;
       setNetUsd(totalUsd);
 
-      // Active fee tier from contract thresholds
-      if (status?.feeThresholds?.length && status?.feeBps?.length) {
-        let tierIdx = null;
-        let pctText = null;
+      // 2) Fetch fee tiers explicitly (refactor-safe)
+      // ---------- Active Fee Tier ----------
+      // Use getFeeTiers(provider) to avoid relying on old status fields
+      let thresholds = [];
+      let bps = [];
+      try {
+        const tiers = await getFeeTiers(provider);
+        thresholds = Array.isArray(tiers?.thresholds) ? tiers.thresholds : tiers?.feeThresholds;
+        bps        = Array.isArray(tiers?.bps)        ? tiers.bps        : tiers?.feeBps;
+      } catch (e) {
+        console.warn("[ContractFunds] getFeeTiers() failed, will fallback to status if present", e);
+      }
 
-        for (let i = 0; i < status.feeThresholds.length; i++) {
-          if (totalUsd >= Number(status.feeThresholds[i])) {
-            tierIdx = i + 1;
-            pctText = `${(status.feeBps[i] / 100).toFixed(2)}%`;
-          }
-        }
+      // Fallback to status (legacy) if tiers not returned
+      if ((!thresholds || thresholds.length === 0) && status?.feeThresholds?.length) {
+        thresholds = status.feeThresholds;
+        bps        = status.feeBps ?? [];
+      }
 
-        setActiveTier(tierIdx);
+      if (thresholds?.length && bps?.length) {
+        // Contract works with integer USD; align by flooring netUsd
+        const netUsdInt = Math.floor(totalUsd);
+        const { tier, pctText } = computeActiveTierCapMode(netUsdInt, thresholds, bps);
+        setActiveTier(tier);
         setActivePct(pctText);
       } else {
         setActiveTier(null);
         setActivePct(null);
       }
+
 
       setLastUpdated(new Date());
     } catch (err) {

@@ -13,7 +13,7 @@ import LoadConsole from "@/components/shared/LoadConsole";
 
 import { log as debugLog, ok as debugOk, warn as debugWarn, error as debugError } from "@/debug/logger";
 
-
+import OracleDebugPanel from "@/components/OracleDebugPanel";
 
 
 const FN_REDEEM_CANDIDATES = ["redeem(address,uint256,address,bytes32[])"];
@@ -94,6 +94,7 @@ export default function RedeemForm({ address: addressProp }) {
   const stepOk = useCallback((msg) => { addLog(msg, "ok"); setBootStepsDone((s)=>s + 1); }, [addLog]);
   const stepWarn = useCallback((msg) => { addLog(msg, "warn"); setBootStepsDone((s)=>s + 1); }, [addLog]);
   const stepErr = useCallback((msg) => { addLog(msg, "error"); setBootStepsDone((s)=>s + 1); }, [addLog]);
+
 
 
   // reCAPTCHA
@@ -713,7 +714,7 @@ export default function RedeemForm({ address: addressProp }) {
         </div>
       )}
 
-
+      <OracleDebugPanel />
 
       {/* Invisible reCAPTCHA */}
       {RECAPTCHA_ENABLED && recaptchaSiteKey && <ReCAPTCHA ref={recaptchaRef} size="invisible" sitekey={recaptchaSiteKey} />}

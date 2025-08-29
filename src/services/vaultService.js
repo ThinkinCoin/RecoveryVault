@@ -2,7 +2,6 @@
 import { Contract, Interface, JsonRpcProvider, getAddress } from "ethers"; //disabled for debug
 import VaultArtifact from "@/ui/abi/RecoveryVaultABI.json";
 import IWETHABI from "@/ui/abi/IWETH.json";
-import IOracleABI from "@/ui/abi/IOracle.json";
 import {
   extractRpcRevert,
   safeEstimateGas,
