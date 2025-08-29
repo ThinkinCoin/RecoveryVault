@@ -1,82 +1,10 @@
 [
   {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "_base",
-        "type": "string"
-      },
-      {
-        "internalType": "string",
-        "name": "_quote",
-        "type": "string"
-      }
-    ],
-    "name": "getReferenceData",
+    "inputs": [],
+    "name": "latestPrice",
     "outputs": [
-      {
-        "components": [
-          {
-            "internalType": "uint256",
-            "name": "rate",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "lastUpdatedBase",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "lastUpdatedQuote",
-            "type": "uint256"
-          }
-        ],
-        "internalType": "struct IStdReference.ReferenceData",
-        "name": "",
-        "type": "tuple"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string[]",
-        "name": "_bases",
-        "type": "string[]"
-      },
-      {
-        "internalType": "string[]",
-        "name": "_quotes",
-        "type": "string[]"
-      }
-    ],
-    "name": "getReferenceDataBulk",
-    "outputs": [
-      {
-        "components": [
-          {
-            "internalType": "uint256",
-            "name": "rate",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "lastUpdatedBase",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "lastUpdatedQuote",
-            "type": "uint256"
-          }
-        ],
-        "internalType": "struct IStdReference.ReferenceData[]",
-        "name": "",
-        "type": "tuple[]"
-      }
+      { "internalType": "int256", "name": "price", "type": "int256" },
+      { "internalType": "uint8",  "name": "decimals", "type": "uint8" }
     ],
     "stateMutability": "view",
     "type": "function"
