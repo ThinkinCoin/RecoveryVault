@@ -13,7 +13,15 @@ import { TracedProvider } from "@/debug/TracedProvider"; // debugger
 
 import { log, ok, warn, error as logError } from "@/debug/logger";
 
-
+// =================
+// Gas Legacy Harmony
+// =================
+const feeOpts = await buildGasFees(signer.provider);           // { type:0, gasPrice } na Harmony
+const gasLimit = await safeEstimateGas(contract, "redeem", args, {
+  overrides: feeOpts,
+  fallback: 500_000n
+});
+const tx = await contract.redeem(...args, { ...feeOpts, gasLimit });
 
 // ==========================
 // Core

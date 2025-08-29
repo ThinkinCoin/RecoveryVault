@@ -1,8 +1,61 @@
 // src/services/txUtils.js
+// All logs/messages in English
 import { Interface } from "ethers";
 
-const FORCE_LEGACY =
+// Optional env switch; but on Harmony we will force legacy regardless.
+const FORCE_LEGACY_ENV =
   String(import.meta?.env?.VITE_FORCE_LEGACY_GAS || "").toLowerCase() === "true";
+
+// Harmony chain id (mainnet). Add testnet if you need.
+const HARMONY_CHAIN_ID = 1666600000n;
+
+// -----------------------------
+// Helpers
+// -----------------------------
+async function getChainId(provider) {
+  try {
+    const net = await provider?.getNetwork?.();
+    // ethers v6 returns bigint
+    if (net?.chainId != null) return BigInt(net.chainId);
+  } catch (_) {}
+  return null;
+}
+
+async function mustUseLegacy(provider) {
+  // Force legacy by env OR when on Harmony chain
+  if (FORCE_LEGACY_ENV) return true;
+  const cid = await getChainId(provider);
+  if (cid === HARMONY_CHAIN_ID) return true;
+  // Default false elsewhere
+  return false;
+}
+
+async function getGasPriceOrFallback(provider) {
+  try {
+    const gp = await provider?.getGasPrice?.(); // bigint
+    if (gp && gp > 0n) return gp;
+  } catch (_) {}
+  // Fallback 1 gwei (adjust if needed)
+  return 1_000_000_000n;
+}
+
+/**
+ * Ensure overrides are legacy if gasPrice is present.
+ * Strips any EIP-1559 fields and sets type:0.
+ */
+function ensureLegacyOverrides(overrides = {}) {
+  const out = { ...(overrides || {}) };
+  if (out.gasPrice != null) {
+    delete out.maxFeePerGas;
+    delete out.maxPriorityFeePerGas;
+    out.type = 0;
+  }
+  return out;
+}
+
+// -----------------------------
+// Public API
+// -----------------------------
 
 /** USD must be integer (no decimals) */
 export function normalizeUsdInt(value) {
@@ -63,54 +116,57 @@ export function isActionRejected(err) {
   return c === 4001 || c === "ACTION_REJECTED";
 }
 
-/** Estimate gas safely; fallback to a default BigInt if it fails */
+/**
+ * Estimate gas safely; fallback to a default BigInt if it fails.
+ * Always injects legacy overrides when gasPrice is present.
+ */
 export async function safeEstimateGas(contract, fnName, args, opts = {}) {
   const fallback = opts?.fallback != null ? BigInt(opts.fallback) : 300000n;
-  const overrides = opts?.overrides || {};
+  const rawOverrides = opts?.overrides || {};
+  const overrides = ensureLegacyOverrides(rawOverrides);
+
   try {
-    // aceita assinatura completa: pega só o nome p/ estimateGas
+    // Accept fully-qualified signature; extract the function name for estimateGas
     const nameOnly = String(fnName).includes("(")
       ? String(fnName).slice(0, String(fnName).indexOf("("))
       : String(fnName);
 
-    // ✅ sem TypeError: use o getter da API v6
     const estimator = contract.estimateGas.getFunction(nameOnly);
     const est = await estimator(...(args || []), overrides);
     return est;
   } catch (err) {
-    // deixe o warn discreto; vamos cair no fallback
     console.warn("[safeEstimateGas] estimate failed, using fallback");
     return fallback;
   }
 }
 
-/** Choose EIP-1559 fees if available, else legacy gasPrice */
+/**
+ * Build fee overrides for the current network.
+ * - On Harmony (or when forced), ALWAYS returns legacy: { type:0, gasPrice }
+ * - Else, tries EIP-1559 via getFeeData(); if missing, falls back to legacy.
+ *
+ * IMPORTANT: On Harmony this NEVER calls getFeeData() to avoid
+ * eth_maxPriorityFeePerGas (-32601) errors.
+ */
 export async function buildGasFees(provider) {
-  // Harmony: prefira legacy quando forçamos por env
-  if (FORCE_LEGACY) {
-    try {
-      const gasPrice = await provider?.getGasPrice?.();
-      return gasPrice ? { gasPrice } : {};
-    } catch {
-      return {};
-    }
+  const legacy = await mustUseLegacy(provider);
+
+  if (legacy) {
+    const gasPrice = await getGasPriceOrFallback(provider);
+    return { type: 0, gasPrice };
   }
 
+  // Non-Harmony path: try EIP-1559 then legacy
   try {
     const fd = await provider?.getFeeData?.();
     if (fd?.maxFeePerGas != null && fd?.maxPriorityFeePerGas != null) {
-      return { maxFeePerGas: fd.maxFeePerGas, maxPriorityFeePerGas: fd.maxPriorityFeePerGas };
+      return { maxFeePerGas: fd.maxFeePerGas, maxPriorityFeePerGas: fd.maxPriorityFeePerGas, type: 2 };
     }
-    if (fd?.gasPrice != null) return { gasPrice: fd.gasPrice };
-  } catch {
-    // silenciar erro do eth_maxPriorityFeePerGas ausente
+    if (fd?.gasPrice != null) return { type: 0, gasPrice: fd.gasPrice };
+  } catch (_) {
+    // Silently ignore if getFeeData is not supported
   }
 
-  // fallback final -> legacy
-  try {
-    const gasPrice = await provider?.getGasPrice?.();
-    return gasPrice ? { gasPrice } : {};
-  } catch {
-    return {};
-  }
+  const gasPrice = await getGasPriceOrFallback(provider);
+  return { type: 0, gasPrice };
 }
