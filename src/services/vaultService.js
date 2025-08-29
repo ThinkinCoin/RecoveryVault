@@ -1,5 +1,5 @@
 // src/services/vaultService.jsx
-import { Contract, Interface, JsonRpcProvider, getAddress } from "ethers"; //disabled for debug
+import { Contract, Interface, JsonRpcProvider, getAddress, encodeBytes32String  } from "ethers"; //disabled for debug
 import VaultArtifact from "@/ui/abi/RecoveryVaultABI.json";
 import IWETHABI from "@/ui/abi/IWETH.json";
 import {
@@ -184,12 +184,20 @@ export async function oracleLatest(p) {
   const code = await p.getCode(o);
   if (!code || code === "0x") throw new Error("Oracle address has no bytecode");
 
-  // 1) Interface do RecoveryVault (a correta para o seu contrato)
+  // Allow overriding base/quote via env; defaults are ONE/USD on Harmony
+  const BASE = (import.meta.env.VITE_ORACLE_BASE || "ONE").toUpperCase();
+  const QUOTE = (import.meta.env.VITE_ORACLE_QUOTE || "USD").toUpperCase();
+
+  // 1) Custom adapter: latestPrice() -> (int256 price, uint8 decimals)
   try {
     const abi1 = [
-      { inputs: [], name: "latestPrice",
-        outputs: [{type:"int256",name:"price"},{type:"uint8",name:"decimals"}],
-        stateMutability:"view", type:"function" }
+      {
+        inputs: [],
+        name: "latestPrice",
+        outputs: [{ type: "int256", name: "price" }, { type: "uint8", name: "decimals" }],
+        stateMutability: "view",
+        type: "function",
+      },
     ];
     const c1 = new Contract(o, abi1, p);
     const r = await c1.latestPrice();
@@ -197,13 +205,15 @@ export async function oracleLatest(p) {
     const decimals = Number(r[1]);
     if (price <= 0n) throw new Error("Invalid oracle price");
     return { price, decimals };
-  } catch (_) { /* tenta próximos formatos */ }
+  } catch (_) {
+    /* continue */
+  }
 
   // 2) Chainlink v2: latestAnswer() + decimals()
   try {
     const abi2 = [
-      { inputs: [], name: "latestAnswer", outputs: [{type:"int256"}], stateMutability:"view", type:"function" },
-      { inputs: [], name: "decimals",     outputs: [{type:"uint8"}],  stateMutability:"view", type:"function" }
+      { inputs: [], name: "latestAnswer", outputs: [{ type: "int256" }], stateMutability: "view", type: "function" },
+      { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
     ];
     const c2 = new Contract(o, abi2, p);
     const [ans, dec] = await Promise.all([c2.latestAnswer(), c2.decimals()]);
@@ -211,29 +221,88 @@ export async function oracleLatest(p) {
     const decimals = Number(dec);
     if (price <= 0n) throw new Error("Invalid oracle price");
     return { price, decimals };
-  } catch (_) {}
+  } catch (_) {
+    /* continue */
+  }
 
   // 3) Chainlink v3: latestRoundData() + decimals()
   try {
     const abi3 = [
-      { inputs: [], name: "latestRoundData",
-        outputs: [
-          {type:"uint80"}, {type:"int256"}, {type:"uint256"},
-          {type:"uint256"}, {type:"uint80"}
-        ], stateMutability:"view", type:"function" },
-      { inputs: [], name: "decimals", outputs: [{type:"uint8"}], stateMutability:"view", type:"function" }
+      {
+        inputs: [],
+        name: "latestRoundData",
+        outputs: [{ type: "uint80" }, { type: "int256" }, { type: "uint256" }, { type: "uint256" }, { type: "uint80" }],
+        stateMutability: "view",
+        type: "function",
+      },
+      { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
     ];
     const c3 = new Contract(o, abi3, p);
     const data = await c3.latestRoundData();
-    const dec  = await c3.decimals();
+    const dec = await c3.decimals();
     const price = BigInt(data[1]);
     const decimals = Number(dec);
     if (price <= 0n) throw new Error("Invalid oracle price");
     return { price, decimals };
+  } catch (_) {
+    /* continue */
+  }
+
+  // 4) Band StdReference (string,string)
+  try {
+    const abiBandStr = [
+      {
+        inputs: [
+          { type: "string", name: "base" },
+          { type: "string", name: "quote" },
+        ],
+        name: "getReferenceData",
+        outputs: [
+          { type: "uint256", name: "rate" },
+          { type: "uint256", name: "lastUpdatedBase" },
+          { type: "uint256", name: "lastUpdatedQuote" },
+        ],
+        stateMutability: "view",
+        type: "function",
+      },
+    ];
+    const cBandStr = new Contract(o, abiBandStr, p);
+    const r = await cBandStr.getReferenceData(BASE, QUOTE);
+    const rate = BigInt(r[0]); // Band rate is 1e18-scaled
+    if (rate <= 0n) throw new Error("Invalid oracle price");
+    return { price: rate, decimals: 18 };
+  } catch (_) {
+    /* continue */
+  }
+
+  // 5) Band StdReference (bytes32,bytes32)
+  try {
+    const abiBandBytes32 = [
+      {
+        inputs: [
+          { type: "bytes32", name: "base" },
+          { type: "bytes32", name: "quote" },
+        ],
+        name: "getReferenceData",
+        outputs: [
+          { type: "uint256", name: "rate" },
+          { type: "uint256", name: "lastUpdatedBase" },
+          { type: "uint256", name: "lastUpdatedQuote" },
+        ],
+        stateMutability: "view",
+        type: "function",
+      },
+    ];
+    const cBandB32 = new Contract(o, abiBandBytes32, p);
+    const r = await cBandB32.getReferenceData(encodeBytes32String(BASE), encodeBytes32String(QUOTE));
+    const rate = BigInt(r[0]); // 1e18-scaled
+    if (rate <= 0n) throw new Error("Invalid oracle price");
+    return { price: rate, decimals: 18 };
   } catch (e) {
-    throw new Error(`Oracle read failed: ${e?.message || "unknown"}`);
+    throw new Error(`Oracle read failed (no supported interface at ${o}): ${e?.message || "unknown"}`);
   }
 }
+
 
 
 export async function isTokenSupported(p, token){
