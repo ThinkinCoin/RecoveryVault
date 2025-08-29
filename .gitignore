@@ -7,3 +7,7 @@ node_modules
 .env.prod
 .env.secret
 cache
+scripts
+hardhat.config.js
+vite.config.js
+vitest.config.js

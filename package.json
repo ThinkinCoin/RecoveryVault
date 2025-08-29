@@ -4,7 +4,7 @@
   "description": "Fixed price redemption vault for depegged tokens on Harmony",
   "homepage": "https://vault.thinkincoin.com",
 
-  "main": "maain.js",
+  "main": "main.js",
   "scripts": {
     "compile": "hardhat compile",
     "test:unit": "vitest run --dir test/unit",
