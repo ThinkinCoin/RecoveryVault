@@ -32,8 +32,8 @@ export default function WalletConnection() {
       {isConnected ? (
         <div className={styles.rowSm}>
           <span className={styles.badge} title={address}>{short}</span>
-          <button className={styles.ButtonIconClean} onClick={onCopy}><FiCopy size={12} /></button>
-          <button onClick={() => disconnect()} className={`${styles.button} ${styles.buttonIcon}`}><FiPower size={16} /></button>
+          <button className={styles.ButtonIconClean} onClick={onCopy} title="copyAddress"><FiCopy size={12}  /></button>
+          <button onClick={() => disconnect()} title="PowerOn" className={`${styles.button} ${styles.buttonIcon}`}><FiPower size={16} /></button>
         </div>
       ) : (
         <button

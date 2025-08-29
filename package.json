@@ -1,8 +1,10 @@
 {
-  "name": "recovery-vault",
-  "version": "1.0.0",
+  "name": "@thinkincoin/recoveryvault",
+  "version": "1.0.0-dev",
   "description": "Fixed price redemption vault for depegged tokens on Harmony",
-  "main": "index.js",
+  "homepage": "https://vault.thinkincoin.com",
+
+  "main": "maain.js",
   "scripts": {
     "compile": "hardhat compile",
     "test:unit": "vitest run --dir test/unit",
@@ -27,8 +29,8 @@
     "@nomicfoundation/hardhat-ethers": "3.1.0",
     "@nomicfoundation/hardhat-network-helpers": "~1.1.0",
     "@reduxjs/toolkit": "^2.8.2",
-    "@reown/appkit": "^1.7.20",
-    "@reown/appkit-adapter-ethers": "^1.7.20",
+    "@reown/appkit": "^1.8.1",
+    "@reown/appkit-adapter-ethers": "^1.8.1",
     "@typechain/hardhat": "9.1.0",
     "@types/chai": "5.2.2",
     "@types/mocha": "10.0.10",
