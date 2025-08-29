@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { useOnePrice } from "@/hooks/useOnePrice";
-import { getVaultStatus } from "@/services/vaultService"; // ✅ no ".jsx"
+import { getVaultStatus } from "@/services/vaultService"; 
 import { ethers } from "ethers";
 
 // Format helpers

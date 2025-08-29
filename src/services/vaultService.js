@@ -298,16 +298,18 @@ export async function preflightReadChecks(vault, provider, ctx) {
 
     if (locked) return { ok: false, reason: "Vault is locked" };
     if (paused) return { ok: false, reason: "Vault is paused" };
-    if (!isActive) return { ok: false, reason: "No active round" };
-
-    // ROUND_DELAY
-    const delay  = BigInt(await vault.ROUND_DELAY().catch(() => 0n));
-    const latest = await provider.getBlock("latest");
-    const now    = BigInt(latest?.timestamp ?? Math.floor(Date.now() / 1000));
-    if (delay && start && now < (start + delay)) {
-      const secs = Number((start + delay) - now);
-      const mins = Math.ceil(secs / 60);
-      return { ok: false, reason: `Round delay in effect. Try again in ~${mins} min` };
+    if (!isActive) {
+      // Mensagem mais amigável se o round ainda não “bateu” o roundStart
+      try {
+        const latest = await provider.getBlock("latest");
+        const now    = BigInt(latest?.timestamp ?? Math.floor(Date.now() / 1000));
+        if (start && now < start) {
+          const secs = Number(start - now);
+          const mins = Math.ceil(secs / 60);
+          return { ok: false, reason: `Round starts in ~${mins} min` };
+        }
+      } catch {}
+      return { ok: false, reason: "No active round" };
     }
 
     // Whitelist (se root ≠ 0)
