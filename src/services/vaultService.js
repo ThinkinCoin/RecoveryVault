@@ -182,10 +182,60 @@ export async function quoteRedeem(p, user, tokenIn, amountIn, redeemIn, proof = 
 
 export async function oracleLatest(p) {
   const o = await oracle(p);
-  const c = new Contract(o, IOracleABI.abi ?? IOracleABI, p);
-  const r = await c.latestPrice();
-  return { price: BigInt(r[0]), decimals: Number(r[1]) };
+  const code = await p.getCode(o);
+  if (!code || code === "0x") throw new Error("Oracle address has no bytecode");
+
+  // 1) Interface do RecoveryVault (a correta para o seu contrato)
+  try {
+    const abi1 = [
+      { inputs: [], name: "latestPrice",
+        outputs: [{type:"int256",name:"price"},{type:"uint8",name:"decimals"}],
+        stateMutability:"view", type:"function" }
+    ];
+    const c1 = new Contract(o, abi1, p);
+    const r = await c1.latestPrice();
+    const price = BigInt(r[0]);
+    const decimals = Number(r[1]);
+    if (price <= 0n) throw new Error("Invalid oracle price");
+    return { price, decimals };
+  } catch (_) { /* tenta próximos formatos */ }
+
+  // 2) Chainlink v2: latestAnswer() + decimals()
+  try {
+    const abi2 = [
+      { inputs: [], name: "latestAnswer", outputs: [{type:"int256"}], stateMutability:"view", type:"function" },
+      { inputs: [], name: "decimals",     outputs: [{type:"uint8"}],  stateMutability:"view", type:"function" }
+    ];
+    const c2 = new Contract(o, abi2, p);
+    const [ans, dec] = await Promise.all([c2.latestAnswer(), c2.decimals()]);
+    const price = BigInt(ans);
+    const decimals = Number(dec);
+    if (price <= 0n) throw new Error("Invalid oracle price");
+    return { price, decimals };
+  } catch (_) {}
+
+  // 3) Chainlink v3: latestRoundData() + decimals()
+  try {
+    const abi3 = [
+      { inputs: [], name: "latestRoundData",
+        outputs: [
+          {type:"uint80"}, {type:"int256"}, {type:"uint256"},
+          {type:"uint256"}, {type:"uint80"}
+        ], stateMutability:"view", type:"function" },
+      { inputs: [], name: "decimals", outputs: [{type:"uint8"}], stateMutability:"view", type:"function" }
+    ];
+    const c3 = new Contract(o, abi3, p);
+    const data = await c3.latestRoundData();
+    const dec  = await c3.decimals();
+    const price = BigInt(data[1]);
+    const decimals = Number(dec);
+    if (price <= 0n) throw new Error("Invalid oracle price");
+    return { price, decimals };
+  } catch (e) {
+    throw new Error(`Oracle read failed: ${e?.message || "unknown"}`);
+  }
 }
+
 
 export async function isTokenSupported(p, token){
   const t = normalizeAddress(token);
@@ -374,16 +424,10 @@ export async function preflightReadChecks(vault, provider, ctx) {
     async function usdValueInt(token, amount) {
       if (addrEq(token, woneAddr)) {
         const dec = await tokenDecimals(token);
-        const or  = await (async () => {
-          const oAddr = await vault.oracle();
-          const oc = new Contract(oAddr, IOracleABI.abi ?? IOracleABI, provider);
-          const r = await oc.latestPrice();
-          return { price: BigInt(r[0]), decs: BigInt(r[1]) };
-        })();
-        if (or.price <= 0n) throw new Error("Invalid oracle");
+        const or  = await oracleLatest(provider); // <— aqui
+        const one = 10n ** 18n;
         const amount1e18 = (BigInt(amount) * one) / (10n ** dec);
-        // ((amount1e18 * price) / 10**oracleDec) / 1e18 => USD inteiro
-        return ((amount1e18 * or.price) / (10n ** or.decs)) / one;
+        return ((amount1e18 * or.price) / (10n ** BigInt(or.decimals))) / one;
       } else if (addrEq(token, usdcAddr)) {
         const udec = await tokenDecimals(usdcAddr);
         return BigInt(amount) / (10n ** udec);
@@ -391,23 +435,21 @@ export async function preflightReadChecks(vault, provider, ctx) {
         const px18 = BigInt(await vault.fixedUsdPrice(token).catch(() => 0n));
         if (px18 === 0n) throw new Error("Price unavailable for selected token");
         const dec = await tokenDecimals(token);
-        // (amount * price18) / 10**dec / 1e18
+        const one = 10n ** 18n;
         return (BigInt(amount) * px18) / (10n ** dec) / one;
       }
     }
 
     async function priceOut18(token) {
-      if (addrEq(token, usdcAddr)) return one; // $1
+      const one = 10n ** 18n;
+      if (addrEq(token, usdcAddr)) return one;
       if (addrEq(token, woneAddr)) {
-        const oAddr = await vault.oracle();
-        const oc = new Contract(oAddr, IOracleABI.abi ?? IOracleABI, provider);
-        const r = await oc.latestPrice();
-        const p = BigInt(r[0]); const d = BigInt(r[1]);
-        if (p <= 0n) throw new Error("Invalid oracle");
-        return (p * one) / (10n ** d);
+        const or = await oracleLatest(provider);  // <— aqui
+        return (BigInt(or.price) * one) / (10n ** BigInt(or.decimals));
       }
       throw new Error("Unsupported redeem token");
     }
+
 
     function calcFeeTokenIn(amountInBN, usdInt, thresholdsBN, bpsArr) {
       // thresholds e usdInt são inteiros em USD
