@@ -3,7 +3,6 @@
   "version": "1.0.0-dev",
   "description": "Fixed price redemption vault for depegged tokens on Harmony",
   "homepage": "https://vault.thinkincoin.com",
-
   "main": "main.js",
   "scripts": {
     "compile": "hardhat compile",
@@ -31,9 +30,11 @@
     "@reduxjs/toolkit": "^2.8.2",
     "@reown/appkit": "^1.8.1",
     "@reown/appkit-adapter-ethers": "^1.8.1",
+    "@reown/appkit-common": "^1.8.1",
     "@typechain/hardhat": "9.1.0",
     "@types/chai": "5.2.2",
     "@types/mocha": "10.0.10",
+    "@walletconnect/universal-provider": "^2.21.8",
     "hardhat-gas-reporter": "2.3.0",
     "keccak256": "^1.0.6",
     "merkletreejs": "0.5.2",

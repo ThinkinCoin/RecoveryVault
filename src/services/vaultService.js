@@ -1,27 +1,18 @@
 // src/services/vaultService.jsx
-import { Contract, Interface, JsonRpcProvider, getAddress, encodeBytes32String  } from "ethers"; //disabled for debug
+import { Contract, Interface, JsonRpcProvider, getAddress } from "ethers";
 import VaultArtifact from "@/ui/abi/RecoveryVaultABI.json";
 import IWETHABI from "@/ui/abi/IWETH.json";
 import {
   extractRpcRevert,
-  safeEstimateGas,
   isActionRejected,
   buildGasFees,
+  GAS_LIMIT_FALLBACK,
+  ensureLegacyOverrides,
 } from "@/services/txUtils";
 
-import { TracedProvider } from "@/debug/TracedProvider"; // debugger
+import { TracedProvider } from "@/debug/TracedProvider";
 
 import { log, ok, warn, error as logError } from "@/debug/logger";
-
-// =================
-// Gas Legacy Harmony
-// =================
-const feeOpts = await buildGasFees(signer.provider);           // { type:0, gasPrice } na Harmony
-const gasLimit = await safeEstimateGas(contract, "redeem", args, {
-  overrides: feeOpts,
-  fallback: 500_000n
-});
-const tx = await contract.redeem(...args, { ...feeOpts, gasLimit });
 
 // ==========================
 // Core
@@ -32,18 +23,11 @@ export const VAULT_ADDRESS = import.meta.env.VITE_VAULT_ADDRESS;
 const VAULT_ABI = VaultArtifact.abi ?? VaultArtifact;
 const DEV = !!import.meta.env?.DEV;
 
-function req(v, msg) {
-  if (!v) throw new Error(msg);
-  return v;
-}
+function req(v, msg) { if (!v) throw new Error(msg); return v; }
 
 export function getDefaultProvider() {
   req(RPC_URL, "[vaultService] VITE_RPC_URL is missing");
-//  return new JsonRpcProvider(RPC_URL); <= Debugger temp
-  try { return new TracedProvider(RPC_URL); }
-  catch { return new JsonRpcProvider(RPC_URL); }
-
-
+  return new JsonRpcProvider(RPC_URL);
 }
 
 export function getVaultAddress() {
@@ -53,10 +37,6 @@ export function getVaultAddress() {
 export async function getReadContract(readProvider) {
   req(readProvider, "[vaultService] readProvider is required");
   const addr = getVaultAddress();
-  const net = await readProvider.getNetwork();
-  if (Number(net.chainId) !== CHAIN_ID) {
-    if (DEV) console.warn(`[vaultService] Unexpected chainId ${net.chainId}; expected ${CHAIN_ID}`);
-  }
   const code = await readProvider.getCode(addr);
   if (!code || code === "0x") throw new Error(`[vaultService] ${addr} has no bytecode`);
   return new Contract(addr, VAULT_ABI, readProvider);
@@ -68,10 +48,17 @@ export async function getWriteContract(signer) {
   return new Contract(addr, VAULT_ABI, signer);
 }
 
+async function assertHarmonySigner(signer) {
+  const net = await signer.provider.getNetwork();
+  if (Number(net.chainId) !== CHAIN_ID) {
+    throw new Error(`Wrong network: ${net.chainId}. Switch to Harmony (${CHAIN_ID}).`);
+  }
+}
+
 // ==========================
 // Helpers
 // ==========================
-function b(v) { return BigInt(v); }
+function b(v) { return typeof v === "bigint" ? v : BigInt(v); }
 function n(v) { return Number(v); }
 function bool(v) { return Boolean(v); }
 export function normalizeAddress(addr) { try { return getAddress(addr); } catch { return null; } }
@@ -80,6 +67,13 @@ function isZeroBytes32(x) { return !x || /^0x0{64}$/i.test(String(x)); }
 function isDecode0x(err) {
   const msg = String(err?.message || err || "");
   return err?.code === "BAD_DATA" || /could not decode result data/i.test(msg) || /value="?0x"?/i.test(msg);
+}
+function decimalToBigInt(value, decimals) {
+  const s = String(value ?? "").trim();
+  if (!s) throw new Error("Invalid override");
+  const [i, f = ""] = s.split(".");
+  const frac = (f + "0".repeat(decimals)).slice(0, decimals);
+  return BigInt(i || "0") * 10n ** BigInt(decimals) + BigInt(frac || "0");
 }
 
 // Minimal ERC20 (inclui decimals!)
@@ -125,7 +119,7 @@ export async function getSupportedTokens(p){ return await (await getReadContract
 
 export async function getUserLimit(p, wallet){
   const r = await (await getReadContract(p)).getUserLimit(wallet);
-  return { remainingUSD: b(r) }; // USD inteiros
+  return { remainingUSD: b(r) };
 }
 
 export async function getVaultBalances(p){
@@ -166,150 +160,122 @@ export async function getVaultStatus(p) {
 }
 
 // ==========================
-// Quote (novo mapeamento)
+// Quote 
 // ==========================
 export async function quoteRedeem(p, user, tokenIn, amountIn, redeemIn, proof = []) {
   const v = await getReadContract(p);
   const r = await v.quoteRedeem(user, tokenIn, amountIn, redeemIn, proof ?? []);
   return {
-    whitelisted:        bool(r[0]),
-    roundIsActive:      bool(r[1]),
-    feeAmountInTokenIn: b(r[2]),
-    burnAmountInTokenIn:b(r[3]),
-    userLimitUsdBefore: b(r[4]), // USD inteiros
-    userLimitUsdAfter:  b(r[5]),
-    usdValueIn:         b(r[6]), // USD inteiros
-    tokenInDecimals:    n(r[7]),
-    redeemInDecimals:   n(r[8]),
-    oraclePrice:        b(r[9]),
-    oracleDecimals:     n(r[10]),
-    amountOutRedeemToken: b(r[11]),
+    whitelisted:        Boolean(r[0]),
+    roundIsActive:      Boolean(r[1]),
+    feeAmountInTokenIn: BigInt(r[2]),
+    burnAmountInTokenIn:BigInt(r[3]),
+    userLimitUsdBefore: BigInt(r[4]),
+    userLimitUsdAfter:  BigInt(r[5]),
+    usdValueIn:         BigInt(r[6]),
+    tokenInDecimals:    Number(r[7]),
+    redeemInDecimals:   Number(r[8]),
+    oraclePrice:        BigInt(r[9]),
+    oracleDecimals:     Number(r[10]),
+    amountOutRedeemToken: BigInt(r[11]),
   };
 }
 
 export async function oracleLatest(p) {
   const o = await oracle(p);
   const code = await p.getCode(o);
-  if (!code || code === "0x") throw new Error("Oracle address has no bytecode");
+  if (!code || code === "0x") throw new Error(`Oracle address has no bytecode (${o})`);
 
-  // Allow overriding base/quote via env; defaults are ONE/USD on Harmony
-  const BASE = (import.meta.env.VITE_ORACLE_BASE || "ONE").toUpperCase();
-  const QUOTE = (import.meta.env.VITE_ORACLE_QUOTE || "USD").toUpperCase();
-
-  // 1) Custom adapter: latestPrice() -> (int256 price, uint8 decimals)
   try {
-    const abi1 = [
-      {
-        inputs: [],
-        name: "latestPrice",
-        outputs: [{ type: "int256", name: "price" }, { type: "uint8", name: "decimals" }],
-        stateMutability: "view",
-        type: "function",
-      },
-    ];
-    const c1 = new Contract(o, abi1, p);
-    const r = await c1.latestPrice();
-    const price = BigInt(r[0]);
-    const decimals = Number(r[1]);
-    if (price <= 0n) throw new Error("Invalid oracle price");
-    return { price, decimals };
-  } catch (_) {
-    /* continue */
-  }
+    const ovRaw = import.meta.env.VITE_ONE_USD_OVERRIDE;
+    if (ovRaw != null && String(ovRaw).trim() !== "") {
+      return { price: decimalToBigInt(String(ovRaw), 18), decimals: 18 };
+    }
+  } catch {}
 
-  // 2) Chainlink v2: latestAnswer() + decimals()
   try {
-    const abi2 = [
-      { inputs: [], name: "latestAnswer", outputs: [{ type: "int256" }], stateMutability: "view", type: "function" },
-      { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
-    ];
-    const c2 = new Contract(o, abi2, p);
-    const [ans, dec] = await Promise.all([c2.latestAnswer(), c2.decimals()]);
-    const price = BigInt(ans);
-    const decimals = Number(dec);
-    if (price <= 0n) throw new Error("Invalid oracle price");
-    return { price, decimals };
-  } catch (_) {
-    /* continue */
-  }
+    const abiA = [{
+      inputs: [], name: "latestPrice",
+      outputs: [{type:"uint256",name:"price"},{type:"uint8",name:"decimals"}],
+      stateMutability:"view", type:"function"
+    }];
+    const cA = new Contract(o, abiA, p);
+    const r = await cA.latestPrice();
+    const price = b(r[0]); const decimals = n(r[1]);
+    if (price > 0n) return { price, decimals };
+  } catch {}
 
-  // 3) Chainlink v3: latestRoundData() + decimals()
   try {
-    const abi3 = [
-      {
-        inputs: [],
-        name: "latestRoundData",
-        outputs: [{ type: "uint80" }, { type: "int256" }, { type: "uint256" }, { type: "uint256" }, { type: "uint80" }],
-        stateMutability: "view",
-        type: "function",
-      },
-      { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" },
-    ];
-    const c3 = new Contract(o, abi3, p);
-    const data = await c3.latestRoundData();
-    const dec = await c3.decimals();
-    const price = BigInt(data[1]);
-    const decimals = Number(dec);
-    if (price <= 0n) throw new Error("Invalid oracle price");
-    return { price, decimals };
-  } catch (_) {
-    /* continue */
-  }
+    const abiB = [{
+      inputs: [], name: "latestPrice",
+      outputs: [{type:"int256",name:"price"},{type:"uint8",name:"decimals"}],
+      stateMutability:"view", type:"function"
+    }];
+    const cB = new Contract(o, abiB, p);
+    const r = await cB.latestPrice();
+    const price = b(r[0]); const decimals = n(r[1]);
+    if (price > 0n) return { price, decimals };
+  } catch {}
 
-  // 4) Band StdReference (string,string)
   try {
-    const abiBandStr = [
-      {
-        inputs: [
-          { type: "string", name: "base" },
-          { type: "string", name: "quote" },
-        ],
-        name: "getReferenceData",
-        outputs: [
-          { type: "uint256", name: "rate" },
-          { type: "uint256", name: "lastUpdatedBase" },
-          { type: "uint256", name: "lastUpdatedQuote" },
-        ],
-        stateMutability: "view",
-        type: "function",
-      },
-    ];
-    const cBandStr = new Contract(o, abiBandStr, p);
-    const r = await cBandStr.getReferenceData(BASE, QUOTE);
-    const rate = BigInt(r[0]); // Band rate is 1e18-scaled
-    if (rate <= 0n) throw new Error("Invalid oracle price");
-    return { price: rate, decimals: 18 };
-  } catch (_) {
-    /* continue */
-  }
+    const abiC = [{
+      inputs: [{name:"base",type:"string"},{name:"quote",type:"string"}],
+      name: "getReferenceData",
+      outputs: [
+        {name:"rate",type:"uint256"},
+        {name:"lastUpdatedBase",type:"uint256"},
+        {name:"lastUpdatedQuote",type:"uint256"}
+      ],
+      stateMutability:"view", type:"function"
+    }];
+    const cC = new Contract(o, abiC, p);
+    const r = await cC.getReferenceData("ONE","USD");
+    const price = b(r[0]);
+    if (price > 0n) return { price, decimals: 18 };
+  } catch {}
 
-  // 5) Band StdReference (bytes32,bytes32)
   try {
-    const abiBandBytes32 = [
-      {
-        inputs: [
-          { type: "bytes32", name: "base" },
-          { type: "bytes32", name: "quote" },
-        ],
-        name: "getReferenceData",
-        outputs: [
-          { type: "uint256", name: "rate" },
-          { type: "uint256", name: "lastUpdatedBase" },
-          { type: "uint256", name: "lastUpdatedQuote" },
-        ],
-        stateMutability: "view",
-        type: "function",
-      },
+    const abiD = [
+      { inputs: [], name: "latestAnswer", outputs: [{type:"int256"}], stateMutability:"view", type:"function" },
+      { inputs: [], name: "decimals",     outputs: [{type:"uint8"}],  stateMutability:"view", type:"function" }
     ];
-    const cBandB32 = new Contract(o, abiBandBytes32, p);
-    const r = await cBandB32.getReferenceData(encodeBytes32String(BASE), encodeBytes32String(QUOTE));
-    const rate = BigInt(r[0]); // 1e18-scaled
-    if (rate <= 0n) throw new Error("Invalid oracle price");
-    return { price: rate, decimals: 18 };
-  } catch (e) {
-    throw new Error(`Oracle read failed (no supported interface at ${o}): ${e?.message || "unknown"}`);
-  }
+    const cD = new Contract(o, abiD, p);
+    const [ans, dec] = await Promise.all([cD.latestAnswer(), cD.decimals()]);
+    const price = b(ans); const decimals = n(dec);
+    if (price > 0n) return { price, decimals };
+  } catch {}
+
+  try {
+    const abiE = [
+      { inputs: [], name: "latestRoundData",
+        outputs: [{type:"uint80"},{type:"int256"},{type:"uint256"},{type:"uint256"},{type:"uint80"}],
+        stateMutability:"view", type:"function" },
+      { inputs: [], name: "decimals", outputs: [{type:"uint8"}], stateMutability:"view", type:"function" }
+    ];
+    const cE = new Contract(o, abiE, p);
+    const data = await cE.latestRoundData();
+    const dec  = await cE.decimals();
+    const price = b(data[1]); const decimals = n(dec);
+    if (price > 0n) return { price, decimals };
+  } catch {}
+
+  try {
+    const abiF = [
+      { inputs: [], name: "latestRoundData",
+        outputs: [{type:"uint80"},{type:"uint256"},{type:"uint256"},{type:"uint256"},{type:"uint80"}],
+        stateMutability:"view", type:"function" },
+      { inputs: [], name: "decimals", outputs: [{type:"uint8"}], stateMutability:"view", type:"function" }
+    ];
+    const cF = new Contract(o, abiF, p);
+    const data = await cF.latestRoundData();
+    const dec  = await cF.decimals();
+    const price = b(data[1]); const decimals = n(dec);
+    if (price > 0n) return { price, decimals };
+  } catch {}
+
+  throw new Error("Oracle read failed: no supported interface (Band/Chainlink) matched");
 }
+
 
 
 
@@ -333,7 +299,7 @@ export async function getAllFixedPrices(p, tokens) {
   const v = await getReadContract(p);
   const results = {};
   for (const t of tokens) {
-    results[t] = BigInt(await v.fixedUsdPrice(t));
+    results[t] = await v.fixedUsdPrice(t);
   }
   return results;
 }
@@ -341,11 +307,6 @@ export async function getAllFixedPrices(p, tokens) {
 // ==========================
 // Admin (Write)
 // ==========================
-export async function redeem(signer, tokenIn, amountIn, redeemIn, proof = [], overrides = {}) {
-  const v = await getWriteContract(signer);
-  if (!Array.isArray(proof)) proof = [];
-  return await v.redeem(tokenIn, amountIn, redeemIn, proof, { ...overrides });
-}
 
 export async function setDailyLimit(signer, usdAmount){ return await (await getWriteContract(signer)).setDailyLimit(usdAmount); }
 export async function setDevWallet(signer, wallet){ return await (await getWriteContract(signer)).setDevWallet(wallet); }
@@ -403,7 +364,6 @@ export async function preflightReadChecks(vault, provider, ctx) {
     if (!redeemIn) return { ok: false, reason: "Select wONE or USDC" };
     if (!amountIn || BigInt(amountIn) <= 0n) return { ok: false, reason: "Enter an amount" };
 
-    // Leitura base
     const [woneAddr, usdcAddr, roundInfo, locked, root, supported] = await Promise.all([
       vault.wONE(),
       vault.usdc(),
@@ -420,15 +380,14 @@ export async function preflightReadChecks(vault, provider, ctx) {
 
     const isActive = Boolean(roundInfo[2]);
     const paused   = Boolean(roundInfo[3]);
-    const start    = BigInt(roundInfo[1]);
+    const start    = b(roundInfo[1]);
 
     if (locked) return { ok: false, reason: "Vault is locked" };
     if (paused) return { ok: false, reason: "Vault is paused" };
     if (!isActive) {
-      // Mensagem mais amigável se o round ainda não “bateu” o roundStart
       try {
         const latest = await provider.getBlock("latest");
-        const now    = BigInt(latest?.timestamp ?? Math.floor(Date.now() / 1000));
+        const now    = b(latest?.timestamp ?? Math.floor(Date.now() / 1000));
         if (start && now < start) {
           const secs = Number(start - now);
           const mins = Math.ceil(secs / 60);
@@ -438,36 +397,33 @@ export async function preflightReadChecks(vault, provider, ctx) {
       return { ok: false, reason: "No active round" };
     }
 
-    // Whitelist (se root ≠ 0)
     if (!isZeroBytes32(root)) {
       const hasProof = Array.isArray(proof) && proof.length > 0;
       if (!hasProof) return { ok: false, reason: "Address not whitelisted (missing proof)" };
     }
 
-    // Tenta quoteRedeem (novo layout + checagem de liquidez pelo amountOut)
     if (typeof vault.quoteRedeem === "function") {
       try {
         const q = await vault.quoteRedeem(user, tokenIn, amountIn, redeemIn, Array.isArray(proof) ? proof : []);
         ok("Vault: quoteRedeem ok");
         const whitelisted     = Boolean(q[0]);
         const roundIsActive   = Boolean(q[1]);
-        const userLimitBefore = BigInt(q[4]); // USD inteiros
-        const usdValueIn      = BigInt(q[6]); // USD inteiros
-        const amountOut       = BigInt(q[11]);
+        const userLimitBefore = b(q[4]);
+        const usdValueIn      = b(q[6]);
+        const amountOut       = b(q[11]);
 
         if (!isZeroBytes32(root) && !whitelisted) return { ok: false, reason: "Address not whitelisted (invalid or wrong proof)" };
         if (!roundIsActive) return { ok: false, reason: "Round is not active" };
         if (usdValueIn === 0n) return { ok: false, reason: "Price unavailable for selected token" };
         if (userLimitBefore < usdValueIn) return { ok: false, reason: "Insufficient remaining daily limit" };
 
-        // Liquidez usando getVaultBalances e o amountOut cotado
         try {
           const bals = await vault.getVaultBalances();
-          const woneBal = BigInt(bals[0]);
-          const usdcBal = BigInt(bals[1]);
+          const woneBal = b(bals[0]);
+          const usdcBal = b(bals[1]);
           if (addrEq(redeemIn, usdcAddr) && usdcBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
           if (addrEq(redeemIn, woneAddr) && woneBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
-        } catch { /* não bloqueia se leitura falhar */ }
+        } catch {}
 
         return { ok: true };
       } catch (err) {
@@ -476,22 +432,18 @@ export async function preflightReadChecks(vault, provider, ctx) {
           logError(`Vault: quoteRedeem revert: ${reason || err?.message || "unknown"}`);
           return { ok: false, reason: reason || "quote failed" };
         }
-        if (DEV) console.warn("[vaultService] quoteRedeem returned 0x/BAD_DATA; using fallback checks");
-        warn("Vault: quoteRedeem BAD_DATA, using fallback");
-        if (DEV) console.warn("[vaultService] quoteRedeem returned 0x/BAD_DATA; using fallback checks");
+        warn("Vault: quoteRedeem BAD_DATA; falling back to local pricing & limits");
       }
     } else if (DEV) {
       console.warn("[vaultService] quoteRedeem missing on-chain; using fallback checks");
     }
 
-    // ---------- FALLBACK ----------
-    // Funções auxiliares para fallback
     const one = 10n ** 18n;
 
     async function tokenDecimals(addr) {
       try {
         const erc = new Contract(addr, ERC20_ABI, provider);
-        return BigInt(await erc.decimals());
+        return b(await erc.decimals());
       } catch {
         return 18n;
       }
@@ -500,84 +452,74 @@ export async function preflightReadChecks(vault, provider, ctx) {
     async function usdValueInt(token, amount) {
       if (addrEq(token, woneAddr)) {
         const dec = await tokenDecimals(token);
-        const or  = await oracleLatest(provider); // <— aqui
-        const one = 10n ** 18n;
-        const amount1e18 = (BigInt(amount) * one) / (10n ** dec);
-        return ((amount1e18 * or.price) / (10n ** BigInt(or.decimals))) / one;
+        const or  = await oracleLatest(provider);
+        const amount1e18 = (b(amount) * one) / (10n ** dec);
+        return ((amount1e18 * or.price) / (10n ** b(or.decimals))) / one;
       } else if (addrEq(token, usdcAddr)) {
         const udec = await tokenDecimals(usdcAddr);
-        return BigInt(amount) / (10n ** udec);
+        return b(amount) / (10n ** udec);
       } else {
-        const px18 = BigInt(await vault.fixedUsdPrice(token).catch(() => 0n));
+        const px18 = b(await vault.fixedUsdPrice(token).catch(() => 0n));
         if (px18 === 0n) throw new Error("Price unavailable for selected token");
         const dec = await tokenDecimals(token);
-        const one = 10n ** 18n;
-        return (BigInt(amount) * px18) / (10n ** dec) / one;
+        return (b(amount) * px18) / (10n ** dec) / one;
       }
     }
 
     async function priceOut18(token) {
-      const one = 10n ** 18n;
       if (addrEq(token, usdcAddr)) return one;
       if (addrEq(token, woneAddr)) {
-        const or = await oracleLatest(provider);  // <— aqui
-        return (BigInt(or.price) * one) / (10n ** BigInt(or.decimals));
+        const or = await oracleLatest(provider);
+        return (b(or.price) * one) / (10n ** b(or.decimals));
       }
       throw new Error("Unsupported redeem token");
     }
 
 
     function calcFeeTokenIn(amountInBN, usdInt, thresholdsBN, bpsArr) {
-      // thresholds e usdInt são inteiros em USD
       for (let i = 0; i < thresholdsBN.length; i++) {
         if (usdInt <= thresholdsBN[i]) {
-          return (amountInBN * BigInt(bpsArr[i])) / 10000n;
+          return (amountInBN * b(bpsArr[i])) / 10000n;
         }
       }
-      return (amountInBN * BigInt(bpsArr[bpsArr.length - 1])) / 10000n;
+      return (amountInBN * b(bpsArr[bpsArr.length - 1])) / 10000n;
     }
 
-    // 1) USD inteiro do input
     const usdIn = await usdValueInt(tokenIn, amountIn);
 
-    // 2) Limite diário (já em USD inteiro)
     try {
-      const remaining = BigInt(await vault.getUserLimit(user));
+      const remaining = b(await vault.getUserLimit(user));
       if (usdIn > remaining) return { ok: false, reason: "Insufficient remaining daily limit" };
-    } catch { /* sem bloquear se falhar */ }
+    } catch {}
 
-    // 3) Fee tiers -> fee em tokenIn, netIn, usdNet
     let feeTokenIn = 0n;
     try {
       const ft = await vault.getFeeTiers();
-      const thresholdsBN = ft[0].map((x) => BigInt(x));
-      const bpsArr = ft[1].map((x) => Number(x));
-      feeTokenIn = calcFeeTokenIn(BigInt(amountIn), BigInt(usdIn), thresholdsBN, bpsArr);
+      const thresholdsBN = ft[0].map((x) => b(x));
+      const bpsArr = ft[1].map((x) => n(x));
+      feeTokenIn = calcFeeTokenIn(b(amountIn), b(usdIn), thresholdsBN, bpsArr);
     } catch {
-      // fallback tier final (10 bps = 0.1%) para não travar; NÃO bloqueia
-      feeTokenIn = (BigInt(amountIn) * 10n) / 10000n;
+      feeTokenIn = (b(amountIn) * 10n) / 10000n;
     }
-    const netIn = BigInt(amountIn) - feeTokenIn;
+    const netIn = b(amountIn) - feeTokenIn;
     const usdNet = await usdValueInt(tokenIn, netIn);
 
-    // 4) amountOut e liquidez
     const redeemDec = await (async () => {
       try {
         const erc = new Contract(redeemIn, ERC20_ABI, provider);
-        return BigInt(await erc.decimals());
+        return b(await erc.decimals());
       } catch { return 18n; }
     })();
     const pOut18 = await priceOut18(redeemIn);
-    // amountOut = (usdNet * 1e18 * 10**redeemDec) / pOut18
     const amountOut = (usdNet * one * (10n ** redeemDec)) / pOut18;
 
     try {
       const bals = await vault.getVaultBalances();
-      const woneBal = BigInt(bals[0]);
-      const usdcBal = BigInt(bals[1]);
+      const woneBal = b(bals[0]);
+      const usdcBal = b(bals[1]);
       if (addrEq(redeemIn, usdcAddr) && usdcBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
       if (addrEq(redeemIn, woneAddr) && woneBal < amountOut) return { ok: false, reason: "Insufficient liquidity" };
-    } catch { /* não bloqueia se falhar */ }
+    } catch {}
 
     return { ok: true, note: "fallback" };
   } catch (err) {
@@ -590,28 +532,22 @@ export async function preflightReadChecks(vault, provider, ctx) {
  */
 export async function preflightRedeem(readProvider, { fn, args, context }) {
   const vault = await getReadContract(readProvider);
-
-  const checks = await preflightReadChecks(vault, readProvider, context);
-  if (!checks.ok) return checks;
-
   try {
     const iface = new Interface(VAULT_ABI);
     const frag  = iface.getFunction(fn);
     const data  = iface.encodeFunctionData(frag, args);
-
     const to =
       (typeof vault.getAddress === "function" ? await vault.getAddress() : null) ||
       vault.target ||
       getVaultAddress();
-
-    await readProvider.call({ to, data, from: context?.user, value: 0n });
+    await readProvider.call({ to, data });
     return { ok: true };
   } catch (err) {
     try {
       const reason = extractRpcRevert(err, vault.interface);
-      return { ok: false, reason: reason || "Execution reverted (no reason)" };
+      return { ok: false, reason: reason || "Execution reverted" };
     } catch {
-      return { ok: false, reason: "Execution reverted (no reason)" };
+      return { ok: false, reason: "Execution reverted" };
     }
   }
 }
@@ -619,65 +555,35 @@ export async function preflightRedeem(readProvider, { fn, args, context }) {
 /**
  * Envio da tx (com fallbacks de gas e estimate)
  */
-export async function submitRedeem(signerContract, { fn, args }, opts = {}) {
+export async function submitRedeem(signer, { fn, args }, opts = {}) {
   try {
-    const vault = await getWriteContract(signerContract);
-    const provider = signerContract?.provider;
+    await assertHarmonySigner(signer);
+    const vault = await getWriteContract(signer);
+    const fee = await buildGasFees(signer.provider);
 
-    // Fees: tenta EIP-1559; se não houver, cai para gasPrice
-    let feeOverrides = {};
     try {
-      feeOverrides = await buildGasFees(provider);
-    } catch {
-      try {
-        const gasPrice = await provider.getGasPrice();
-        if (gasPrice) feeOverrides = { gasPrice };
-      } catch { /* ignore */ }
+      await vault.getFunction(fn).staticCall(...args);
+    } catch (err) {
+      const reason = extractRpcRevert(err, vault.interface);
+      return { ok: false, stage: "simulate", reason: reason || "Redeem will revert" };
     }
-
-    // Estimate: safeEstimateGas espera o NOME ("redeem"), não a assinatura
-    let gasLimit;
-    try {
-      const iface = new Interface(VAULT_ABI);
-      const fnName = iface.getFunction(fn).name; // "redeem"
-      gasLimit = await safeEstimateGas(vault, fnName, args, {
-        fallback: opts.fallbackGas ?? 300000n,
-        overrides: { value: 0n, ...feeOverrides },
-      });
-    } catch {
-      // Fallback direto no estimateGas da assinatura
-      try {
-        const estimator = vault.estimateGas.getFunction(fn);
-        gasLimit = await estimator(...args, { value: 0n, ...feeOverrides });
-      } catch {
-        gasLimit = opts.fallbackGas ?? 300000n;
-      }
-    }
-
-    const overrides = {
-      ...feeOverrides,
-      gasLimit,
-      value: 0n,
-      ...(opts.overrides || {}),
-    };
+    const gasLimit = BigInt(opts.fallbackGas ?? GAS_LIMIT_FALLBACK);
+    const overrides = ensureLegacyOverrides({ ...fee, gasLimit });
 
     const tx = await vault.getFunction(fn)(...args, overrides);
     return { ok: true, tx };
   } catch (err) {
-    if (isActionRejected(err)) {
-      return { ok: false, rejected: true, reason: "User rejected" };
-    }
+    if (isActionRejected(err)) return { ok: false, rejected: true, reason: "User rejected" };
     try {
-      const v = await getWriteContract(signerContract);
+      const v = await getWriteContract(signer);
       const reason = extractRpcRevert(err, v.interface);
-      logError(`Vault: submit error ${reason || err?.message || "send failed"}`);
       return { ok: false, reason: reason || err?.message || "send failed" };
     } catch {
-      logError(`Vault: submit error ${err?.message || "send failed"}`);
       return { ok: false, reason: err?.message || "send failed" };
     }
   }
 }
+
 
 /**
  * Variante única (simulate → send)
@@ -712,4 +618,59 @@ export async function redeemVariantFlow({
   }
 
   return { ok: true, tx: sent.tx };
+}
+
+export async function redeem(
+  signer,
+  tokenIn,
+  amountIn,          // bigint ou string numérica
+  redeemIn,
+  proof = [],
+  overrides = {}
+) {
+  await assertHarmonySigner(signer);
+  const v = await getWriteContract(signer);
+  const fee = await buildGasFees(signer.provider);
+
+  // Normaliza a prova para bytes32[]
+  const normalizedProof = Array.isArray(proof)
+    ? proof.map(p => (typeof p === 'string' ? p : ethers.hexlify(p)))
+    : [];
+
+  const args = [tokenIn, amountIn, redeemIn, normalizedProof];
+
+  // Use SEMPRE os mesmos overrides em todas as chamadas
+  const mergedOverrides = {
+    value: overrides?.value ?? 0n,     // padrão: não enviar ONE nativo
+    gasPrice: fee.gasPrice,
+    ...overrides,
+  };
+
+  // (Opcional, mas útil) sanity checks antes da simulação
+  const me = await signer.getAddress();
+  const [round, isSupported] = await Promise.all([
+    v.getRoundInfo(),                  // { roundId, startTime, isActive, paused, limitUsd }
+    v.supportedToken(tokenIn),
+  ]);
+  if (!isSupported) throw new Error('tokenIn não suportado pelo vault');
+  if (!round.isActive || round.paused) throw new Error('round inativa ou vault pausado');
+
+  // Garante whitelist/limite e preço > 0
+  const q = await v.quoteRedeem(me, tokenIn, amountIn, redeemIn, normalizedProof);
+  if (!q.whitelisted) throw new Error('prova inválida ou wallet fora da whitelist');
+  if (!q.roundIsActive) throw new Error('round não está ativa');
+  if (q.oraclePrice === 0n && (await v.fixedUsdPrice(tokenIn)) === 0n)
+    throw new Error('preço do tokenIn indisponível');
+
+  try {
+    // Simula com os MESMOS overrides
+    await v.redeem.staticCall(...args, mergedOverrides);
+  } catch (err) {
+    const reason = extractRpcRevert(err, v.interface);
+    throw new Error(`Redeem vai reverter: ${reason}`);
+  }
+  const gasLimit = GAS_LIMIT_FALLBACK;
+  const finalOverrides = ensureLegacyOverrides({ ...mergedOverrides, gasLimit });
+  return v.redeem(...args, finalOverrides);
+
 }

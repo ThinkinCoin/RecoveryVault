@@ -1,11 +1,16 @@
+// AdminDash.jsx (AppKit Core refactor — no @reown/appkit/react hooks)
+// - Uses ContractContext (already migrated to AppKit Core helpers)
+// - Connect action uses openConnect() from appKit.js
+// - Reads use ctxProvider/ctxSigner/ctxAccount only
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { useContractContext } from "@/contexts/ContractContext";
 import Footer from "@/ui/layout/footer";
 import WalletConnection from "@/components/wallet/WalletConnection";
-import { useAppKit, useAppKitAccount } from "@reown/appkit/react";
 import * as vaultService from "@/services/vaultService";
 import { ethers } from "ethers";
+import { openConnect } from "@/services/appKit";
 
 // --- Helpers ---
 const cls = (...cx) => cx.filter(Boolean).join(" ");
@@ -78,7 +83,6 @@ function HeaderFrame() {
           </div>
           <div className={styles.headerRight}>
             <div className={styles.headerRightInner}>
-              {/* Put the connect widget back */}
               <WalletConnection />
             </div>
           </div>
@@ -88,12 +92,9 @@ function HeaderFrame() {
   );
 }
 
-
 export default function AdminDash() {
-  // signer from ContractContext (WalletConnect/multisig)
+  // signer/account/provider from ContractContext (AppKit Core)
   const { provider: ctxProvider, account: ctxAccount, signer: ctxSigner } = useContractContext();
-  const appkitAccount = useAppKitAccount ? useAppKitAccount() : undefined;
-  const { open } = useAppKit();
 
   const [owner, setOwner] = useState("");
   const [account, setAccount] = useState("");
@@ -146,8 +147,8 @@ export default function AdminDash() {
       if (!provider) throw new Error("Provider not available");
       const c = await vaultService.getReadContract(provider);
 
-      // Resolve connected account (NEVER call getSigner() from JsonRpcProvider here)
-      const acc = appkitAccount?.address || ctxAccount || "";
+      // Connected account from context
+      const acc = ctxAccount || "";
 
       // Parallel fetch from contract
       const [own, ri, wAddr, uAddr, dev, rmc, ora, mroot, sup, feesRaw] = await Promise.all([
@@ -246,7 +247,7 @@ export default function AdminDash() {
     } finally {
       setLoadingOwner(false);
     }
-  }, [provider, appkitAccount?.address, ctxAccount]);
+  }, [provider, ctxAccount]);
 
   // Initial load + when provider/account changes
   useEffect(() => { if (provider) { loadBasics(); } }, [provider, loadBasics]);
@@ -521,9 +522,9 @@ export default function AdminDash() {
           {notice && <AdminAlert type={notice.type}>{notice.msg}</AdminAlert>}
           {!ctxSigner && (
             <AdminAlert type="info">
-              Not connected. <button className={styles.button} onClick={() => open({ view: 'Connect', namespace: 'eip155' })}>Connect Wallet</button>
+              Not connected. <button className={styles.button} onClick={() => openConnect()}>Connect Wallet</button>
             </AdminAlert>
-          )}          
+          )}
 
           {loadingOwner ? (
             <AdminAlert type="info">Loading owner and round info…</AdminAlert>

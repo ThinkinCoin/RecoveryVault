@@ -6,7 +6,7 @@
 // que será chamado assim que todas as aprovações forem confirmadas — imediatamente antes do
 // estágio de `redeeming`. Use para integrar com `useTokenAllowance(...).refresh()` e atualizar a UI.
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { ethers } from "ethers";
 import * as redeemService from "@/services/redeemService";
 
@@ -41,7 +41,6 @@ export default function useRedeem(readProvider){
   const [receipts, setReceipts] = useState({ approvals: [], redeem: null });
 
   const aliveRef = useRef(true);
-  const lastPrepareParamsRef = useRef(null);
 
   const reset = useCallback(() => {
     setState("idle");
@@ -54,20 +53,17 @@ export default function useRedeem(readProvider){
     setReceipts({ approvals: [], redeem: null });
   }, []);
 
-  // Cleanup em unmount
   const setSafe = useCallback((fn) => {
     if (!aliveRef.current) return;
     fn();
   }, []);
 
-  // prepare → monta plano (approve → redeem) + preview
   const prepare = useCallback(async (params) => {
     if (!readProvider) {
       setSafe(() => { setState("error"); setError("Provider not ready"); });
       return null;
     }
     setSafe(() => { setState("preparing"); setError(null); setProgress(null); });
-    lastPrepareParamsRef.current = params;
     try{
       const p = await redeemService.prepareRedeem(readProvider, params);
       setSafe(() => {
@@ -85,7 +81,6 @@ export default function useRedeem(readProvider){
     }
   }, [readProvider, setSafe]);
 
-  // execute → executa plano (approve(s) → redeem)
   const execute = useCallback(async (signer, opts = {}) => {
     if (!plan) { setSafe(() => { setError("No plan to execute"); setState("error"); }); return null; }
     if (!plan.ok) { setSafe(() => { setError("Plan is blocked"); setState("blocked"); }); return null; }
@@ -97,8 +92,6 @@ export default function useRedeem(readProvider){
         if (stage === "approving") setState("approving");
         if (stage === "redeeming") setState("redeeming");
       });
-      // Chama refresh assim que entrarmos no estágio "redeeming",
-      // isto é, após aprovações confirmadas e imediatamente antes do redeem.
       if (stage === "redeeming" && typeof opts.onAllowanceRefresh === "function"){
         try { Promise.resolve(opts.onAllowanceRefresh()).catch(() => {}); } catch {}
       }
@@ -124,19 +117,15 @@ export default function useRedeem(readProvider){
   const isBlocked = useMemo(() => state === "blocked", [state]);
   const isReady = useMemo(() => state === "ready", [state]);
 
-  // manage lifecycle
-  useMemo(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
+  useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false; }; }, []);
 
   return { state, error, plan, display, reasons, warnings, progress, receipts, prepare, execute, reset, canPrepare, canExecute, isBlocked, isReady };
 }
 
 function normalizeErr(e){
   try{
-    // ethers v6 error shapes
     const short = e?.shortMessage || e?.reason || e?.message;
     if (!short) return "Unexpected error";
-
-    // Mapeia reverts comuns para UX
     const s = String(short);
     if (/Round not started/i.test(s)) return "Round ainda não começou (ROUND_DELAY em curso).";
     if (/No funds/i.test(s)) return "Cofre sem fundos para este round.";
