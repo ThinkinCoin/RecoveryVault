@@ -8,7 +8,7 @@ import { ContractProvider } from "./contexts/ContractContext";
 import App from "./App";
 import "./styles/Global.module.css";
 import { HashRouter } from "react-router-dom"; // MM mobile lida melhor com hash
-import ErrorBoundary from "./ErrorBoundary";
+//import ErrorBoundary from "./ErrorBoundary";
 
 import { emit } from "@/debug/logger";
 import { installGlobalDiagnostics } from "@/debug/instrumentation";
@@ -21,7 +21,6 @@ ensureInit();
 preloadProofs().catch(() => {});
 
 const app = (
-  <ErrorBoundary>
     <Provider store={store}>
       <ReownProvider>
         <ContractProvider>
@@ -31,7 +30,6 @@ const app = (
         </ContractProvider>
       </ReownProvider>
     </Provider>
-  </ErrorBoundary>
 );
 
 const root = ReactDOM.createRoot(document.getElementById("root"));

@@ -4,7 +4,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Recovery from "@/pages/Recovery";
 import AdminDash from "@/pages/AdminDash";
 import { preloadProofs } from "@/services/whitelistService";
-import BootConsoleDock from "@/components/shared/BootConsoleDock";
+//import BootConsoleDock from "@/components/shared/BootConsoleDock";
 
 export default function App() {
   useEffect(() => {
@@ -14,8 +14,8 @@ export default function App() {
 
   return (
     <>
-      {/* console flutuante (apenas um lugar na app) */}
-      <BootConsoleDock />
+      {/* console flutuante (apenas um lugar na app) 
+      <BootConsoleDock />*/}
 
       <Routes>
         <Route path="/" element={<Recovery />} />

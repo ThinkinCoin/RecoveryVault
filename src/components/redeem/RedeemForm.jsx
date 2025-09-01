@@ -47,6 +47,32 @@ async function getTokenMetaCached(provider, addr){
   }
 }
 
+function formatUnitsFixed(raw, tokenDecimals, fractionDigits = 2) {
+  const v = BigInt(raw ?? 0n);
+  const d = BigInt(tokenDecimals ?? 18);
+  const f = BigInt(Math.max(0, fractionDigits|0));
+
+  // Queremos arredondar v / 10^d para f casas
+  if (d >= f) {
+    const pow = 10n ** (d - f);
+    const rounded = (v + pow / 2n) / pow; // round half-up
+    let s = rounded.toString();
+    if (f === 0n) return s;
+    const fd = Number(f);
+    if (s.length <= fd) s = "0".repeat(fd - s.length + 1) + s;
+    const i = s.length - fd;
+    return `${s.slice(0, i)}.${s.slice(i)}`;
+  } else {
+    // d < f: não há fração; só precisamos “adicionar zeros” à direita
+    const powUp = 10n ** (f - d);
+    let s = (v * powUp).toString();
+    const fd = Number(f);
+    if (s.length <= fd) s = "0".repeat(fd - s.length + 1) + s;
+    const i = s.length - fd;
+    return `${s.slice(0, i)}.${s.slice(i)}`;
+  }
+}
+
 function rpcFriendly(e){
   const code = e?.code;
   const raw = e?.data?.message || e?.error?.message || e?.shortMessage || e?.reason || e?.message || String(e || "");
@@ -355,7 +381,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
         if (!alive) return;
         if (p && p !== 0n) {
           const num = Number(txt);
-          setFixedPriceText(Number.isFinite(num) ? `$${num.toFixed(6)}` : `$${txt}`);
+          setFixedPriceText(Number.isFinite(num) ? `$${num.toFixed(2)}` : `$${txt}`);
         } else {
           setFixedPriceText("");
         }
@@ -798,7 +824,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
           <h4 className={styles.contractRedeemTitle}>Operation preview</h4>
           <div className={styles.contractRedeemRow}>
             <span className={styles.contractRedeemLabel}>Will receive</span>
-            <span className={styles.contractRedeemValue}>{formatUnits(receivePreview.raw, receivePreview.decimals)} {receivePreview.symbol}</span>
+            <span className={styles.contractRedeemValue}>{formatUnitsFixed(receivePreview.raw, receivePreview.decimals, 2)} {receivePreview.symbol}</span>
           </div>
           <div className={styles.contractRedeemRow}>
             <span className={styles.contractRedeemLabel}>Fee amount</span>
@@ -806,7 +832,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
           </div>
           <div className={styles.contractRedeemRow}>
             <span className={styles.contractRedeemLabel}>Max receive</span>
-            <span className={styles.contractRedeemValue}>{formatUnits(receivePreview.maxOut ?? receivePreview.raw, receivePreview.decimals)} {receivePreview.symbol}</span>
+            <span className={styles.contractRedeemValue}>{formatUnitsFixed(receivePreview.maxOut ?? receivePreview.raw, receivePreview.decimals, 2)} {receivePreview.symbol}</span>
           </div>
           {!!fixedPriceText && (
             <div className={styles.contractRedeemRow}>
@@ -814,19 +840,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
               <span className={styles.contractRedeemValue}>{fixedPriceText}</span>
             </div>
           )}
-          <div className={styles.contractRedeemRow}>
-            <span className={styles.contractRedeemLabel}>Daily limit after</span>
-            <span className={styles.contractRedeemValue}>{(() => {
-              const afterOnChain = receivePreview?.userLimitUsdAfter;
-              if (afterOnChain != null) {
-                return `$${Number(formatUnits(BigInt(afterOnChain), 18)).toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
-              }
-              const before = limitUSD18 ?? 0n;
-              const amt = amountUSD18 ?? 0n;
-              const after = before > amt ? (before - amt) : 0n;
-              return `$${Number(formatUnits(after, 18)).toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
-            })()}</span>
-          </div>
+
           {(receivePreview.burnAmountInTokenIn ?? 0n) > 0n && (
             <div className={styles.contractRedeemRow}>
               <span className={styles.contractRedeemLabel}>Amount burned</span>
