@@ -809,9 +809,10 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
           </div>
         </div>
       </div>
-      <div className={styles.field}>
-        <label className={styles.smallMuted}>Amount</label>
-        <div className={styles.row}>
+      <div className={styles.contractRedeemField}>
+        
+        <label className={styles.contractRedeemMuted}>Amount</label>
+        <div className={styles.contractRedeemRow}>
           <input className={styles.input} type="text" inputMode="decimal" placeholder="e.g. 100" value={amountHuman} onChange={(e) => setAmountHuman(e.target.value)} disabled={busy} />
           <button type="button" className={styles.button} onClick={onMax} disabled={!isConnected || !address || !tokenIn || busy}>Max</button>
         </div>
@@ -821,27 +822,27 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
       </div>
       {receivePreview && (
         <div className={styles.contractRedeemPreview}>
-          <div className={styles.contractRedeemRow}>
+          <div className={styles.contractRedeemPreviewRow}>
             <span className={styles.contractRedeemLabel}>Will receive</span>
             <span className={styles.contractRedeemValue}>{formatUnitsFixed(receivePreview.raw, receivePreview.decimals, 2)} {receivePreview.symbol}</span>
           </div>
-          <div className={styles.contractRedeemRow}>
+          <div className={styles.contractRedeemPreviewRow}>
             <span className={styles.contractRedeemLabel}>Fee amount</span>
             <span className={styles.contractRedeemValue}>{formatUnits(receivePreview.feeAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}</span>
           </div>
-          <div className={styles.contractRedeemRow}>
+          <div className={styles.contractRedeemPreviewRow}>
             <span className={styles.contractRedeemLabel}>Max receive</span>
             <span className={styles.contractRedeemValue}>{formatUnitsFixed(receivePreview.maxOut ?? receivePreview.raw, receivePreview.decimals, 2)} {receivePreview.symbol}</span>
           </div>
           {!!fixedPriceText && (
-            <div className={styles.contractRedeemRow}>
+            <div className={styles.contractRedeemPreviewRow}>
               <span className={styles.contractRedeemLabel}>Fixed price</span>
               <span className={styles.contractRedeemValue}>{fixedPriceText}</span>
             </div>
           )}
 
           {(receivePreview.burnAmountInTokenIn ?? 0n) > 0n && (
-            <div className={styles.contractRedeemRow}>
+            <div className={styles.contractRedeemPreviewRow}>
               <span className={styles.contractRedeemLabel}>Amount burned</span>
               <span className={styles.contractRedeemValue}>{formatUnits(receivePreview.burnAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}</span>
             </div>

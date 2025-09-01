@@ -404,13 +404,14 @@ body{font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0;}
 .contractRedeemRefreshBtn{ border-radius:10px; border:1px solid rgba(255,255,255,0.12); background:transparent; padding:6px 10px; cursor:pointer; font-size:12px; color:var(--text-primary); }
 .contractRedeemRefreshBtn:hover{ border-color:var(--primary); color:var(--primary); }
 .contractRedeemButtonRow{ display: flex;  justify-content: space-around;  align-items: center;}
-.contractRedeemRow {  display: flex; justify-content: space-between; font-size: 12px; align-items: center; flex-direction: row;}
+.contractRedeemRow {  display: flex; justify-content: center; font-size: 12px; align-items: center; flex-direction: row;}
 .contractRedeemLabel {  color: var(--text-secondary);  font-weight: 500;}
+.contractRedeemPreviewRow{display: flex; justify-content:space-between; font-size: 12px; align-items: center; flex-direction: row;}
 
 .contractRedeemValue {  font-weight: 600;  color: var(--text-primary);  font-variant-numeric: tabular-nums;}
 .contractRedeemSubLabel{ opacity:0.9; }
 .contractRedeemSubValue{ font-variant-numeric:tabular-nums; }
-.contractRedeemMuted{ opacity:0.7; margin-left:8px; }
+.contractRedeemMuted{ opacity:0.8; font-size:12px;     margin-inline-start: 2%; }
 .contractRedeemSep{ height:1px; background:rgba(255,255,255,0.08); margin:4px 0; }
 
 .contractRedeemErrorBox{ border:1px solid #ff6b6b; background:rgba(255,107,107,0.1); color:#ff8a8a; border-radius:12px; padding:12px; font-size:13px; }
