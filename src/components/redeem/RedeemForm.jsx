@@ -820,8 +820,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
         <button type="button" className={`${styles.button} ${styles.buttonConfirm} ${styles.buttonAccent} ${confirmDisabled ? styles.buttonDisabled : ""}`} onClick={onConfirm} disabled={confirmDisabled}>{busy ? "Processing…" : "Confirm"}</button>
       </div>
       {receivePreview && (
-        <div className={styles.contractRedeemCardInner}>
-          <h4 className={styles.contractRedeemTitle}>Operation preview</h4>
+        <div className={styles.contractRedeemPreview}>
           <div className={styles.contractRedeemRow}>
             <span className={styles.contractRedeemLabel}>Will receive</span>
             <span className={styles.contractRedeemValue}>{formatUnitsFixed(receivePreview.raw, receivePreview.decimals, 2)} {receivePreview.symbol}</span>
