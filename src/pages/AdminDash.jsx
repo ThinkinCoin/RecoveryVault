@@ -10,7 +10,7 @@ import Footer from "@/ui/layout/footer";
 import WalletConnection from "@/components/wallet/WalletConnection";
 import * as vaultService from "@/services/vaultService";
 import { ethers } from "ethers";
-import { openConnect } from "@/services/appKit";
+import { openConnect } from "@/services/appkit";
 
 // --- Helpers ---
 const cls = (...cx) => cx.filter(Boolean).join(" ");
