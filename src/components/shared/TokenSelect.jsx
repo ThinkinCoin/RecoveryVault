@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { ethers } from "ethers";
-import { getDefaultProvider, getSupportedTokens, supportedToken, normalizeAddress } from "@/services/vaultService";
+import { getDefaultProvider, getSupportedTokens, supportedToken } from "@/services/vaultService";
 import tokenCatalog from "@/lists/harmony-tokenlist.json"; // tokenlist with logo, name, symbol, decimals, address/contract
 
 /**
@@ -26,7 +26,8 @@ export default function TokenSelect({
   const [open, setOpen] = useState(false);
   const [list, setList] = useState([]); // [{ address, symbol, logoURI }]
   const [loading, setLoading] = useState(false);
-
+  const normalizeAddress = (a) => {try { return ethers.getAddress(a); } catch { return null; }};
+  
   const selectedAddr = useMemo(
     () => normalizeAddress(typeof value === "string" ? value : value?.address) || "",
     [value]

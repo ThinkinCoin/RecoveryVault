@@ -1,87 +1,21 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import styles from "../../styles/Global.module.css";
 import { FiCopy, FiPower } from "react-icons/fi";
 
-// ✅ Hooks do AppKit React para abrir o modal
-import { useAppKit, useAppKitAccount } from "@reown/appkit/react";
-
-// Helpers que você já tem (ainda úteis p/ estado inicial e disconnect)
-import {
-  getActiveWalletProvider,
-  disconnectWallet,
-  getAppKitInstance
-} from "@/services/appkit";
+// Use the ContractContext instead of calling useAppKit() directly.
+// This avoids crashes when createAppKit() hasn't run (SSR/misconfig)
+// and centralizes provider/events/debounce logic in one place.
+import { useContractContext } from "@/contexts/ContractContext";
 
 export default function WalletConnection() {
-  const { open } = useAppKit(); 
-  const { address: hookedAddress, isConnected: hookedIsConnected } =
-    useAppKitAccount({ namespace: "eip155" });
-
-  const [address, setAddress] = useState("");
-  const [isConnected, setIsConnected] = useState(false);
-
-  // Espelha o estado dos hooks do AppKit (quando disponíveis)
-  useEffect(() => {
-    if (hookedAddress) setAddress(hookedAddress);
-    setIsConnected(Boolean(hookedIsConnected));
-  }, [hookedAddress, hookedIsConnected]);
+  const { account, connect, disconnect } = useContractContext();
+  const address = account || "";
+  const isConnected = Boolean(account);
 
   const short = useMemo(
     () => (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : ""),
     [address]
   );
-
-  async function refreshFromProvider() {
-    try {
-      const prov = await getActiveWalletProvider();
-      if (!prov) {
-        setIsConnected(false);
-        setAddress("");
-        return;
-      }
-      const accounts = await prov.request({ method: "eth_accounts" }).catch(() => []);
-      const next = Array.isArray(accounts) && accounts.length > 0 ? String(accounts[0]) : "";
-      setAddress(next);
-      setIsConnected(!!next);
-    } catch {
-      setIsConnected(false);
-      setAddress("");
-    }
-  }
-
-  // Eventos EIP-1193 do provider ativo (opcional, mantém estado em sync mesmo sem os hooks)
-  useEffect(() => {
-    let detach = () => {};
-    (async () => {
-      try {
-        const prov = await getActiveWalletProvider();
-        if (!prov || typeof prov.on !== "function") return;
-
-        const onAccounts = (accs) => {
-          const next = Array.isArray(accs) && accs[0] ? String(accs[0]) : "";
-          setAddress(next);
-          setIsConnected(!!next);
-        };
-        const onChain = () => refreshFromProvider();
-        const onDisconnect = () => { setIsConnected(false); setAddress(""); };
-
-        prov.on("accountsChanged", onAccounts);
-        prov.on("chainChanged", onChain);
-        prov.on("disconnect", onDisconnect);
-
-        detach = () => {
-          const off = prov.removeListener || prov.off;
-          off?.call(prov, "accountsChanged", onAccounts);
-          off?.call(prov, "chainChanged", onChain);
-          off?.call(prov, "disconnect", onDisconnect);
-        };
-      } finally {
-        await refreshFromProvider();
-      }
-    })();
-
-    return () => { try { detach?.(); } catch {} };
-  }, []);
 
   async function onCopy() {
     try {
@@ -95,9 +29,8 @@ export default function WalletConnection() {
 
   async function onConnect() {
     try {
-      // ✅ Abre o modal oficial do AppKit
-      open({ view: "Connect", namespace: "eip155" });
-      // O hook useAppKitAccount refletirá o estado após a aprovação
+      const res = await connect?.();
+      if (res && res.ok === false) console.warn("[Wallet] Connect warning:", res.error);
     } catch (err) {
       console.error("[Wallet] Connect failed:", err);
     }
@@ -105,12 +38,10 @@ export default function WalletConnection() {
 
   async function onDisconnect() {
     try {
-      await disconnectWallet();
+      const res = await disconnect?.();
+      if (res && res.ok === false) console.warn("[Wallet] Disconnect warning:", res.error);
     } catch (err) {
       console.error("[Wallet] Disconnect failed:", err);
-    } finally {
-      setIsConnected(false);
-      setAddress("");
     }
   }
 
