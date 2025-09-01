@@ -39,7 +39,12 @@ const LS_KEY = (root, addr) => `wl::${root.toLowerCase()}::${addr.toLowerCase()}
 const CACHE = {
   rootLoaded: false,
   fileRoot: null,
+  rootPromise: null,
 };
+// Single-flight caches
+let rootInflight = null;                     // promise única para carregar o merkleRoot de arquivo
+const proofInflight = new Map();             // chave: LS_KEY(root,address) -> Promise<bytes32[]>
+
 
 // -------- helpers --------
 async function fetchJson(url, { timeoutMs = 6000 } = {}) {
@@ -94,12 +99,29 @@ function isZeroRoot(root) {
 }
 
 async function loadRootOnce() {
-  if (CACHE.rootLoaded) return CACHE.fileRoot || null;
-  const j = await fetchFirstOk(URLS.merkleRoot);
-  if (j && typeof j.merkleRoot === "string") CACHE.fileRoot = j.merkleRoot;
-  CACHE.rootLoaded = true;
-  return CACHE.fileRoot || null;
+  // fast path: já temos o valor
+  if (CACHE.fileRoot) return CACHE.fileRoot;
+
+  // se já tem promessa em voo, reusa
+  if (CACHE.rootPromise) return CACHE.rootPromise;
+
+  // dispara apenas uma vez
+  CACHE.rootPromise = (async () => {
+    const j = await fetchFirstOk(URLS.merkleRoot);
+    const root = (j && typeof j.merkleRoot === "string") ? j.merkleRoot : null;
+    CACHE.fileRoot = root;
+    CACHE.rootLoaded = true;
+    return root;
+  })();
+
+  try {
+    return await CACHE.rootPromise;
+  } finally {
+    // libera a promise (mesmo se der erro) — próximos calls podem tentar de novo
+    CACHE.rootPromise = null;
+  }
 }
+
 
 // Tenta buscar a prova por vários formatos/locais sem baixar o arquivo gigante
 async function tryFetchProofSmart(root, address) {
@@ -161,10 +183,10 @@ async function tryFetchProofSmart(root, address) {
 
 // -------- API pública --------
 export async function preloadProofs() {
-  // Agora, apenas garante que root de arquivo (se existir) está cacheado.
-  await loadRootOnce();
+  await loadRootOnce();  
   return true;
 }
+
 
 export async function getFileMerkleRoot() {
   return await loadRootOnce();
@@ -178,12 +200,14 @@ export async function getChainRoot(provider) {
 export async function getProofFast(provider, address) {
   if (!provider || !address) return [];
 
+  // 1) lê o root on-chain (whitelist desativada? retorna vazio)
   const chainRoot = await getChainMerkleRoot(provider);
-  if (isZeroRoot(chainRoot)) return []; // whitelist OFF
+  if (isZeroRoot(chainRoot)) return [];
 
-  // Cache local
+  // 2) cache em localStorage
+  const lsKey = LS_KEY(chainRoot, address);
   try {
-    const cached = localStorage.getItem(LS_KEY(chainRoot, address));
+    const cached = localStorage.getItem(lsKey);
     if (cached) {
       const arr = JSON.parse(cached);
       const proof = toBytes32Array(arr);
@@ -191,21 +215,46 @@ export async function getProofFast(provider, address) {
     }
   } catch { /* ignore */ }
 
-  // Busca “smart”
-  const proof = await tryFetchProofSmart(chainRoot, address);
-
-  // Cachea se achou
-  if (proof.length) {
-    try { localStorage.setItem(LS_KEY(chainRoot, address), JSON.stringify(proof)); } catch {}
+  // 3) single-flight por root+address
+  if (proofInflight.has(lsKey)) {
+    try { return await proofInflight.get(lsKey); } catch { /* cai para baixo */ }
   }
 
-  return proof;
+  const promise = (async () => {
+    // Busca “smart” (per-address, shard, legacy, fallback gigante)
+    const proof = await tryFetchProofSmart(chainRoot, address);
+
+    // Cacheia se achou
+    if (proof.length) {
+      try { localStorage.setItem(lsKey, JSON.stringify(proof)); } catch {}
+    }
+    return proof;
+  })();
+
+  proofInflight.set(lsKey, promise);
+
+  try {
+    return await promise;
+  } finally {
+    proofInflight.delete(lsKey); // libera slot
+  }
 }
+
 
 export async function hasFileProof(provider, address) {
   const p = await getProofFast(provider, address);
   return p.length > 0;
 }
+
+export function invalidateWhitelistCaches() {
+  CACHE.rootLoaded = false;
+  CACHE.fileRoot = null;
+  rootInflight = null;
+  proofInflight.clear();
+  // se quiser, limpe localStorage seletivamente por prefixo "wl::"
+  // for (const k of Object.keys(localStorage)) { if (k.startsWith('wl::')) localStorage.removeItem(k); }
+}
+
 
 export async function checkWhitelist(provider, address) {
   const chainRoot = await getChainMerkleRoot(provider);

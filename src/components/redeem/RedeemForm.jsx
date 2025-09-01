@@ -8,7 +8,7 @@ import * as core from "@/services/vaultCore";
 import * as redeemSvc from "@/services/redeemService";
 import TokenSelect from "@/components/shared/TokenSelect";
 import ReCAPTCHA from "react-google-recaptcha";
-import { preloadProofs, useWhitelist } from "@/services/whitelistService";
+import { useWhitelist } from "@/services/whitelistService";
 import LoadConsole from "@/components/shared/LoadConsole";
 import { useOnePrice } from "@/hooks/useOnePrice";
 //import OracleDebugPanel from "@/components/OracleDebugPanel";
@@ -241,7 +241,6 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
     return val;
   }, [readProvider]);
 
-  useEffect(() => { preloadProofs().catch(() => {}); }, []);
 
   useEffect(() => {
     if (ctxProvider) return;
@@ -738,6 +737,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
 
   return (
     <div className={styles.contractRedeemCard}>
+      {/*}
       <LoadConsole
         open={bootOpen && (bootBusy || bootLogs.length > 0)}
         title="Preparing Vault"
@@ -745,7 +745,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
         busy={bootBusy}
         progress={bootBusy ? bootProgress : null}
         onClose={() => setBootOpen(false)}
-      />
+      /> */}
       <div className={styles.contractRedeemHeader}>
         <h3 className={styles.h3} style={{ margin: 0 }}>Redeem</h3>
       </div>
