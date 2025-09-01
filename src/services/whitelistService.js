@@ -315,7 +315,7 @@ export async function checkWhitelist(provider, address) {
   if (!proof.length) {
     return {
       ok: false,
-      reason: "Address not whitelisted (proof not found for this wallet)",
+      reason: "",
       proof,
       chainRoot,
       fileRoot,
