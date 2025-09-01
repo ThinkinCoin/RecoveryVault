@@ -4,7 +4,7 @@ import { EthersAdapter } from '@reown/appkit-adapter-ethers';
 import { defineChain } from '@reown/appkit/networks';
 import { JsonRpcProvider } from 'ethers';
 
-const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
+export const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
 const DEFAULT_RPC_FALLBACK = 'https://api.harmony.one';
 
 function safeRpcUrl() {
@@ -32,9 +32,9 @@ function toHttps(u) {
   }
 }
 
-const RPC_URL = safeRpcUrl();
-const PROJECT_ID = (import.meta.env.VITE_REOWN_PROJECT_ID || '').trim();
-const CAIP_ID = `eip155:${CHAIN_ID}`;
+export const RPC_URL = safeRpcUrl();
+export const PROJECT_ID = (import.meta.env.VITE_REOWN_PROJECT_ID || '').trim();
+export const CAIP_ID = `eip155:${CHAIN_ID}`;
 
 export const harmony = defineChain({
   id: CHAIN_ID,
@@ -131,29 +131,19 @@ export async function getActiveWalletProvider() {
   return ensureInit()?.getWalletProvider?.() || null;
 }
 
-// Attach JSON-RPC debugging wrapper to any EIP-1193 provider
-export function attachRpcDebug(provider, label = 'wallet') {
-  try {
-    if (!provider || typeof provider.request !== 'function') return provider;
-    const original = provider.request.bind(provider);
-    provider.request = async (args) => {
-      try {
-        return await original(args);
-      } catch (e) {
-        console.error('[RPC DEBUG]', label, args?.method, args?.params, e);
-        throw e;
-      }
-    };
-  } catch {}
-  return provider;
-}
-
 // Exported JSON-RPC debug wrapper to aid diagnosing RPC errors
 // Wraps any EIP-1193 compatible provider.request and logs method/params on failures
 export function attachRpcDebug(provider, label = 'wallet') {
   try {
     if (!provider || typeof provider.request !== 'function') return provider;
+
+    // Avoid double wrapping (e.g., HMR)
+    const FLAG = '__rvRpcDebugWrapped__';
+    if (provider[FLAG]) return provider;
+
     const original = provider.request.bind(provider);
+    Object.defineProperty(provider, FLAG, { value: true, enumerable: false });
+
     provider.request = async (args) => {
       try {
         return await original(args);
@@ -165,4 +155,3 @@ export function attachRpcDebug(provider, label = 'wallet') {
   } catch {}
   return provider;
 }
-

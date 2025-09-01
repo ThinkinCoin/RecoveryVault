@@ -10,6 +10,7 @@ import TokenSelect from "@/components/shared/TokenSelect";
 import ReCAPTCHA from "react-google-recaptcha";
 import { preloadProofs, useWhitelist } from "@/services/whitelistService";
 import LoadConsole from "@/components/shared/LoadConsole";
+import { useOnePrice } from "@/hooks/useOnePrice";
 //import OracleDebugPanel from "@/components/OracleDebugPanel";
 
 const ERC20_MINI = [
@@ -72,6 +73,7 @@ function rpcFriendly(e){
 export default function RedeemForm({ address: addressProp, debounceMs }) {
   const { provider: ctxProvider, signer: ctxSigner } = useContractContext();
   const { isConnected, address: appkitAddress } = useAppKitAccount({ namespace: "eip155" });
+  const { price: oneUsdFloat } = useOnePrice();
 
   const readProvider = useMemo(() => {
     if (ctxProvider) return ctxProvider;
@@ -173,13 +175,37 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
     try { if (!isValidHuman(s)) return null; return parseUnits(String(s), dec); } catch { return null; }
   }, [isValidHuman]);
 
-  const getCachedOracle = useCallback(async () => {
-    const now = Date.now();
-    if (oracleCacheRef.current.value && now - oracleCacheRef.current.ts < ORACLE_TTL_MS) return oracleCacheRef.current.value;
-    const out = await core.oracleLatest(readProvider).catch(() => ({ price: 0n, decimals: 18 }));
-    oracleCacheRef.current = { ts: now, value: out };
-    return out;
-  }, [readProvider]);
+ const getCachedOracle = useCallback(async () => {
+   // Try hook first (ONE price in USD, 18 dec)
+   const n = Number(oneUsdFloat);
+   if (Number.isFinite(n) && n > 0) {
+     const p18 = BigInt(Math.round(n * 1e18));
+     return { price: p18, decimals: 18 };
+   }
+   // Fallback to core (must also be USD per ONE, 18 dec)
+   const now = Date.now();
+   if (oracleCacheRef.current.value && now - oracleCacheRef.current.ts < ORACLE_TTL_MS) {
+     return oracleCacheRef.current.value;
+   }
+   const out = await core.oracleLatest(readProvider).catch(() => ({ price: 0n, decimals: 18 }));
+   // If core returns inverted (ONE per USD), heuristically invert (>1 means likely inverted)
+   try {
+     const { price = 0n, decimals = 18 } = out || {};
+     if (price > 0n) {
+       // normalize to 18-dec USD/ONE
+       const p18 = decimals === 18 ? price : (price * 10n ** 18n) / 10n ** BigInt(decimals);
+       // If p18 > 1e18 (i.e., > $1), pode estar certo; se p18 ~ 97 (1e18*97): invertido.
+       // Para ONE hoje (~$0.01), preço correto deve ser << 1e18. Se for >>, invertamos.
+       const isInverted = p18 > 10n ** 18n; 
+       const norm = isInverted ? ( (10n ** 36n) / p18 ) : p18; // invert
+       const normalized = { price: norm, decimals: 18 };
+       oracleCacheRef.current = { ts: now, value: normalized };
+       return normalized;
+     }
+   } catch {}
+   oracleCacheRef.current = { ts: now, value: out };
+   return out;
+ }, [readProvider, oneUsdFloat]);
 
   const getCachedRoundInfo = useCallback(async () => {
     const now = Date.now();
@@ -412,9 +438,16 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
             const tiers = await getCachedFeeTiers().catch(() => ({ thresholds: [], bps: [] }));
             const pickBps = (u18) => {
               const th = tiers.thresholds || [];
-              const bps = tiers.bps || [];
-              for (let i=0;i<th.length;i++){ const t = th[i] ?? 0n; if (u18 <= t) return Number(bps[i] ?? 0); }
-              return Number(bps[(bps.length||1)-1] || 0);
+              let bpsArr = (tiers.bps || []).map((x) => Number(x || 0));
+              // auto-detect: if every value <= 100, assume PERCENT and convert to BPS
+              if (bpsArr.length && bpsArr.every((v) => v <= 100)) {
+                bpsArr = bpsArr.map((v) => v * 100); // 1% -> 100 bps
+              }
+              for (let i = 0; i < th.length; i++) {
+                const t = th[i] ?? 0n;
+                if (u18 <= t) return Number(bpsArr[i] ?? 0);
+              }
+              return Number(bpsArr[(bpsArr.length || 1) - 1] || 0);
             };
             const bps = pickBps(usd18);
             const fee = amountIn * BigInt(bps) / 10000n;
@@ -436,9 +469,35 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
               }
             }
 
+            // Compute usdOut18 from the *output* token:
+            // - if USDC: scale to 18 decimals
+            // - if wONE: multiply by ONE/USD (18-dec), then normalize to 18
+            let usdOut18 = 0n;
+            if (outIsUSDC) {
+              usdOut18 = amountOut * 10n ** 18n / 10n ** BigInt(outDec);
+            } else {
+              const { price = 0n, decimals = 18 } = await getCachedOracle();
+              if (price > 0n) {
+                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals); // USD/ONE in 18-dec
+                usdOut18 = amountOut * price18 / 10n ** 18n;
+              }
+            }
+
             if (!cancelled && runId === runIdRef.current) {
-              setAmountUSD18(usd18);
-              setReceivePreview({ raw: amountOut, decimals: outDec, symbol: outSym, feeAmountInTokenIn: fee, burnAmountInTokenIn: 0n, maxOut: amountOut, roundIsActive: true, whitelisted: !!(wlProof && wlProof.length), userLimitUsdAfter: null });
+              // Use usdOut18 (output-based) as the amount that consumes the daily limit
+              setAmountUSD18(usdOut18);
+              setReceivePreview({
+                raw: amountOut,
+                decimals: outDec,
+                symbol: outSym,
+                feeAmountInTokenIn: fee,
+                burnAmountInTokenIn: 0n,
+                maxOut: amountOut,
+                roundIsActive: true,
+                whitelisted: !!(wlProof && wlProof.length),
+                userLimitUsdAfter: null,
+                usdOut18 // helpful for debugging/render if you want
+              });
             }
           } catch {}
         };
@@ -452,9 +511,39 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
               : 18;
           const outSym = (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase()) ? "USDC" : "wONE";
           if (!cancelled && runId === runIdRef.current) {
-            setAmountUSD18(BigInt(q.usdValueIn ?? 0n));
-            setLimitUSD18(BigInt(q.userLimitUsdAfter ?? q.userLimitUsdBefore ?? remainingUSD18));
-            setReceivePreview({ raw: q.amountOutRedeemToken ?? 0n, decimals: outDec, symbol: outSym, feeAmountInTokenIn: q.feeAmountInTokenIn ?? 0n, burnAmountInTokenIn: q.burnAmountInTokenIn ?? 0n, maxOut: q.amountOutRedeemToken ?? 0n, roundIsActive: !!q.roundIsActive, whitelisted: !!q.whitelisted, userLimitUsdAfter: BigInt(q.userLimitUsdAfter ?? 0n) });
+            // Derive usdOut18 from on-chain amountOut
+            let usdOut18 = 0n;
+            const amountOut = BigInt(q.amountOutRedeemToken ?? 0n);
+            const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
+            if (outIsUSDC) {
+              usdOut18 = amountOut * 10n ** 18n / 10n ** BigInt(outDec);
+            } else {
+              const { price = 0n, decimals = 18 } = await getCachedOracle();
+              if (price > 0n) {
+                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals);
+                usdOut18 = amountOut * price18 / 10n ** 18n;
+              }
+            }
+
+            // Prefer on-chain userLimitUsdAfter; fallback to remaining - usdOut18
+            const onChainAfter = q.userLimitUsdAfter != null ? BigInt(q.userLimitUsdAfter) : null;
+            const after = onChainAfter != null ? onChainAfter
+                        : (remainingUSD18 > usdOut18 ? (remainingUSD18 - usdOut18) : 0n);
+
+            setAmountUSD18(usdOut18);
+            setLimitUSD18(BigInt(q.userLimitUsdBefore ?? remainingUSD18));
+            setReceivePreview({
+              raw: amountOut,
+              decimals: outDec,
+              symbol: outSym,
+              feeAmountInTokenIn: q.feeAmountInTokenIn ?? 0n,
+              burnAmountInTokenIn: q.burnAmountInTokenIn ?? 0n,
+              maxOut: amountOut,
+              roundIsActive: !!q.roundIsActive,
+              whitelisted: !!q.whitelisted,
+              userLimitUsdAfter: after,
+              usdOut18
+            });
           }
         } else {
           await computeLocal();
@@ -466,9 +555,36 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
                 ? usdcDecimals
                 : 18;
             const outSym = (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase()) ? "USDC" : "wONE";
-            setAmountUSD18(BigInt(qLater.usdValueIn ?? 0n));
-            setLimitUSD18(BigInt(qLater.userLimitUsdAfter ?? qLater.userLimitUsdBefore ?? remainingUSD18));
-            setReceivePreview({ raw: qLater.amountOutRedeemToken ?? 0n, decimals: outDec, symbol: outSym, feeAmountInTokenIn: qLater.feeAmountInTokenIn ?? 0n, burnAmountInTokenIn: qLater.burnAmountInTokenIn ?? 0n, maxOut: qLater.amountOutRedeemToken ?? 0n, roundIsActive: !!qLater.roundIsActive, whitelisted: !!qLater.whitelisted, userLimitUsdAfter: BigInt(qLater.userLimitUsdAfter ?? 0n) });
+            let usdOut18 = 0n;
+            const amountOut = BigInt(qLater.amountOutRedeemToken ?? 0n);
+            const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
+            if (outIsUSDC) {
+              usdOut18 = amountOut * 10n ** 18n / 10n ** BigInt(outDec);
+            } else {
+              const { price = 0n, decimals = 18 } = await getCachedOracle();
+              if (price > 0n) {
+                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals);
+                usdOut18 = amountOut * price18 / 10n ** 18n;
+              }
+            }
+            const onChainAfter = qLater.userLimitUsdAfter != null ? BigInt(qLater.userLimitUsdAfter) : null;
+            const after = onChainAfter != null ? onChainAfter
+                        : (remainingUSD18 > usdOut18 ? (remainingUSD18 - usdOut18) : 0n);
+
+            setAmountUSD18(usdOut18);
+            setLimitUSD18(BigInt(qLater.userLimitUsdBefore ?? remainingUSD18));
+            setReceivePreview({
+              raw: amountOut,
+              decimals: outDec,
+              symbol: outSym,
+              feeAmountInTokenIn: qLater.feeAmountInTokenIn ?? 0n,
+              burnAmountInTokenIn: qLater.burnAmountInTokenIn ?? 0n,
+              maxOut: amountOut,
+              roundIsActive: !!qLater.roundIsActive,
+              whitelisted: !!qLater.whitelisted,
+              userLimitUsdAfter: after,
+              usdOut18
+            });
           }
         }
       } catch {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
+// @dev RecoveryVault: non-1:1 redeem; output only wONE/USDC; fee in tokenIn; USD-integer accounting.
 import {Ownable} from "./hub/access/Ownable.sol";
 import {IERC20} from "./hub/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "./hub/token/ERC20/extensions/IERC20Metadata.sol";

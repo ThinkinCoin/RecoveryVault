@@ -167,11 +167,14 @@ export function getEventTopics() {
 const oracleCache = new WeakMap();
 const ORACLE_TTL_MS = Number(import.meta.env.VITE_ORACLE_TTL_MS ?? 10000);
 
+
+
 export async function oracleLatest(p) {
   const o = await oracle(p);
   const code = await p.getCode(o);
   if (!code || code === "0x") throw new Error("Oracle address has no bytecode");
 
+  // cache key per provider+chain+oracle
   const net = await p.getNetwork().catch(() => null);
   const chainId = Number(net?.chainId ?? 0);
   let map = oracleCache.get(p);
@@ -181,72 +184,99 @@ export async function oracleLatest(p) {
   const hit = map.get(key);
   if (hit && now - hit.t < ORACLE_TTL_MS) return hit.v;
 
+  // env flags
+  const invertEnv = String(import.meta.env.VITE_ORACLE_INVERT || "").toLowerCase() === "true";
+  const ORACLE_BASE = String(import.meta.env.VITE_ORACLE_BASE || "ONE");
+  const ORACLE_QUOTE = String(import.meta.env.VITE_ORACLE_QUOTE || "USD");
+
+  // Normalize to USD/ONE with 18 decimals, regardless of underlying oracle format
+  const normalize = (rawPrice, rawDecimals, opts = {}) => {
+    const price = BigInt(rawPrice ?? 0);
+    const decimals = Number(rawDecimals ?? 18);
+    const invert = !!opts.invert;
+    if (price <= 0n) return null;
+    if (invert) {
+      // If oracle returns ONE/USD with D decimals, invert to USD/ONE in 1e18
+      const num = (10n ** 18n) * (10n ** BigInt(decimals));
+      const val = num / price; // safe because price > 0
+      return { price: val, decimals: 18 };
+    }
+    // If oracle returns USD/ONE with D decimals, scale to 1e18
+    const val = (price * (10n ** 18n)) / (10n ** BigInt(decimals));
+    return { price: val, decimals: 18 };
+  };
+
+  // 1) Band Protocol: getReferenceData(base, quote) -> rate (1e18)
   try {
-    const abiC = [{
-      inputs: [{name:"base",type:"string"},{name:"quote",type:"string"}],
+    const abi = [{
+      inputs: [{ name: "base", type: "string" }, { name: "quote", type: "string" }],
       name: "getReferenceData",
       outputs: [
-        {name:"rate",type:"uint256"},
-        {name:"lastUpdatedBase",type:"uint256"},
-        {name:"lastUpdatedQuote",type:"uint256"}
+        { name: "rate", type: "uint256" },
+        { name: "lastUpdatedBase", type: "uint256" },
+        { name: "lastUpdatedQuote", type: "uint256" }
       ],
-      stateMutability:"view", type:"function"
+      stateMutability: "view", type: "function"
     }];
-    const cC = new Contract(o, abiC, p);
-    const r = await cC.getReferenceData("ONE","USD");
-    const price = BigInt(r[0]);
-    if (price > 0n) { const out = { price, decimals: 18 }; map.set(key,{t:now,v:out}); return out; }
+    const c = new Contract(o, abi, p);
+    const r = await c.getReferenceData(ORACLE_BASE, ORACLE_QUOTE);
+    const out = normalize(BigInt(r[0]), 18, { invert: false });
+    if (out) { map.set(key, { t: now, v: out }); return out; }
   } catch {}
 
+  // 2) Custom: latestPrice() -> (price, decimals). Assume USD/ONE unless inverted by env.
   try {
-    const abiA = [{
+    const abi = [{
       inputs: [], name: "latestPrice",
-      outputs: [{type:"uint256",name:"price"},{type:"uint8",name:"decimals"}],
-      stateMutability:"view", type:"function"
+      outputs: [{ name: "price", type: "int256" }, { name: "decimals", type: "uint8" }],
+      stateMutability: "view", type: "function"
     }];
-    const cA = new Contract(o, abiA, p);
-    const r = await cA.latestPrice();
-    const price = BigInt(r[0]); const decimals = Number(r[1]);
-    if (price > 0n) { const out = { price, decimals }; map.set(key,{t:now,v:out}); return out; }
+    const c = new Contract(o, abi, p);
+    const r = await c.latestPrice();
+    const out = normalize(BigInt(r[0]), Number(r[1]), { invert: invertEnv });
+    if (out) { map.set(key, { t: now, v: out }); return out; }
   } catch {}
 
+  // 3) Chainlink-style: latestAnswer()/decimals(). Assume USD/ONE unless inverted by env.
   try {
-    const abiD = [
-      { inputs: [], name: "latestAnswer", outputs: [{type:"int256"}], stateMutability:"view", type:"function" },
-      { inputs: [], name: "decimals",     outputs: [{type:"uint8"}],  stateMutability:"view", type:"function" }
+    const abi = [
+      { inputs: [], name: "latestAnswer", outputs: [{ type: "int256" }], stateMutability: "view", type: "function" },
+      { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" }
     ];
-    const cD = new Contract(o, abiD, p);
-    const [ans, dec] = await Promise.all([cD.latestAnswer(), cD.decimals()]);
-    const price = BigInt(ans); const decimals = Number(dec);
-    if (price > 0n) { const out = { price, decimals }; map.set(key,{t:now,v:out}); return out; }
+    const c = new Contract(o, abi, p);
+    const [ans, dec] = await Promise.all([c.latestAnswer(), c.decimals()]);
+    const out = normalize(BigInt(ans), Number(dec), { invert: invertEnv });
+    if (out) { map.set(key, { t: now, v: out }); return out; }
   } catch {}
 
+  // 4) Chainlink-style: latestRoundData(int256)/decimals()
   try {
-    const abiE = [
-      { inputs: [], name: "latestRoundData",
-        outputs: [{type:"uint80"},{type:"int256"},{type:"uint256"},{type:"uint256"},{type:"uint80"}],
-        stateMutability:"view", type:"function" },
-      { inputs: [], name: "decimals", outputs: [{type:"uint8"}], stateMutability:"view", type:"function" }
+    const abi = [
+      { inputs: [], name: "latestRoundData", outputs: [
+        { type: "uint80" }, { type: "int256" }, { type: "uint256" }, { type: "uint256" }, { type: "uint80" }
+      ], stateMutability: "view", type: "function" },
+      { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" }
     ];
-    const cE = new Contract(o, abiE, p);
-    const data = await cE.latestRoundData();
-    const dec  = await cE.decimals();
-    const price = BigInt(data[1]); const decimals = Number(dec);
-    if (price > 0n) { const out = { price, decimals }; map.set(key,{t:now,v:out}); return out; }
+    const c = new Contract(o, abi, p);
+    const data = await c.latestRoundData();
+    const dec = await c.decimals();
+    const out = normalize(BigInt(data[1]), Number(dec), { invert: invertEnv });
+    if (out) { map.set(key, { t: now, v: out }); return out; }
   } catch {}
 
+  // 5) Chainlink-style: latestRoundData(uint256)/decimals()
   try {
-    const abiF = [
-      { inputs: [], name: "latestRoundData",
-        outputs: [{type:"uint80"},{type:"uint256"},{type:"uint256"},{type:"uint256"},{type:"uint80"}],
-        stateMutability:"view", type:"function" },
-      { inputs: [], name: "decimals", outputs: [{type:"uint8"}], stateMutability:"view", type:"function" }
+    const abi = [
+      { inputs: [], name: "latestRoundData", outputs: [
+        { type: "uint80" }, { type: "uint256" }, { type: "uint256" }, { type: "uint256" }, { type: "uint80" }
+      ], stateMutability: "view", type: "function" },
+      { inputs: [], name: "decimals", outputs: [{ type: "uint8" }], stateMutability: "view", type: "function" }
     ];
-    const cF = new Contract(o, abiF, p);
-    const data = await cF.latestRoundData();
-    const dec  = await cF.decimals();
-    const price = BigInt(data[1]); const decimals = Number(dec);
-    if (price > 0n) { const out = { price, decimals }; map.set(key,{t:now,v:out}); return out; }
+    const c = new Contract(o, abi, p);
+    const data = await c.latestRoundData();
+    const dec = await c.decimals();
+    const out = normalize(BigInt(data[1]), Number(dec), { invert: invertEnv });
+    if (out) { map.set(key, { t: now, v: out }); return out; }
   } catch {}
 
   throw new Error("Oracle read failed");
