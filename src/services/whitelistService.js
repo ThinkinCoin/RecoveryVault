@@ -1,12 +1,8 @@
 // src/services/whitelistService.js
 import { ethers } from "ethers";
-import * as vaultService from "@/services/vaultService";
+import * as core from "@/services/vaultCore";
 import { fetchJsonPlus } from "@/debug/fetchPlus";
-
 import { log, ok, warn, error } from "@/debug/logger";
-
-
-
 
 /**
  * Estratégia:
@@ -42,9 +38,8 @@ const CACHE = {
   rootPromise: null,
 };
 // Single-flight caches
-let rootInflight = null;                     // promise única para carregar o merkleRoot de arquivo
+let rootInflight = null;                     // mantido para compat; não usado diretamente
 const proofInflight = new Map();             // chave: LS_KEY(root,address) -> Promise<bytes32[]>
-
 
 // -------- helpers --------
 async function fetchJson(url, { timeoutMs = 6000 } = {}) {
@@ -61,16 +56,9 @@ async function fetchJson(url, { timeoutMs = 6000 } = {}) {
   }
 }
 
-{/* Temporary disable
 async function fetchFirstOk(urls) {
-  for (const u of urls) {
-    const j = await fetchJson(u);
-    if (j) return j;
-  }
-  return null;
+  return await fetchJsonPlus(urls, { timeoutMs: 20000 });
 }
-  */}
-async function fetchFirstOk(urls) { return await fetchJsonPlus(urls, { timeoutMs: 20000 }); }
 
 function toBytes32Array(arr) {
   if (!Array.isArray(arr)) return [];
@@ -91,10 +79,10 @@ function addrShard(addr) {
 }
 
 async function getChainMerkleRoot(provider) {
-  return await vaultService.merkleRoot(provider);
+  return await core.merkleRoot(provider);
 }
 
-function isZeroRoot(root) {
+export function isZeroRoot(root) {
   return !root || root === ethers.ZeroHash;
 }
 
@@ -121,7 +109,6 @@ async function loadRootOnce() {
     CACHE.rootPromise = null;
   }
 }
-
 
 // Tenta buscar a prova por vários formatos/locais sem baixar o arquivo gigante
 async function tryFetchProofSmart(root, address) {
@@ -181,12 +168,62 @@ async function tryFetchProofSmart(root, address) {
   return [];
 }
 
-// -------- API pública --------
-export async function preloadProofs() {
-  await loadRootOnce();  
-  return true;
+// --- merkle verification helpers (OZ-compatible) ---
+function normHex32(x) {
+  return ethers.zeroPadValue(ethers.hexlify(x), 32);
 }
 
+function leafForAddress(addr) {
+  // keccak256(abi.encodePacked(address))
+  return ethers.solidityPackedKeccak256(["address"], [addr]);
+}
+
+function hashPair(aHex, bHex) {
+  // aHex, bHex: 0x… (32 bytes)
+  return ethers.keccak256(ethers.concat([aHex, bHex]));
+}
+
+function processProofSorted(leafHex, proof32) {
+  // OpenZeppelin MerkleProof: pares ordenados (a <= b) antes de concatenar
+  let computed = leafHex;
+  for (const sib of proof32) {
+    const a = computed.toLowerCase();
+    const b = sib.toLowerCase();
+    computed = (a <= b) ? hashPair(computed, sib) : hashPair(sib, computed);
+  }
+  return computed;
+}
+
+function processProofUnsorted(leafHex, proof32) {
+  // Fallback para árvores sem sort nos pares (dependendo de como a árvore foi gerada)
+  let computed = leafHex;
+  for (const sib of proof32) {
+    computed = hashPair(computed, sib);
+  }
+  return computed;
+}
+
+/** Verifica proof contra root. Tenta modo sorted (OZ) e, se falhar, unsorted */
+function verifyMerkleProof(address, proofArr, rootHex) {
+  if (!Array.isArray(proofArr) || !proofArr.length) return false;
+  if (!rootHex) return false;
+
+  const proof32 = proofArr.map(normHex32);
+  const leafHex = leafForAddress(address);
+  const root = ethers.hexlify(rootHex).toLowerCase();
+
+  const sortedComputed   = processProofSorted(leafHex, proof32).toLowerCase();
+  if (sortedComputed === root) return true;
+
+  const unsortedComputed = processProofUnsorted(leafHex, proof32).toLowerCase();
+  return unsortedComputed === root;
+}
+
+// -------- API pública --------
+export async function preloadProofs() {
+  await loadRootOnce();
+  return true;
+}
 
 export async function getFileMerkleRoot() {
   return await loadRootOnce();
@@ -240,7 +277,6 @@ export async function getProofFast(provider, address) {
   }
 }
 
-
 export async function hasFileProof(provider, address) {
   const p = await getProofFast(provider, address);
   return p.length > 0;
@@ -255,14 +291,21 @@ export function invalidateWhitelistCaches() {
   // for (const k of Object.keys(localStorage)) { if (k.startsWith('wl::')) localStorage.removeItem(k); }
 }
 
-
 export async function checkWhitelist(provider, address) {
   const chainRoot = await getChainMerkleRoot(provider);
   const fileRoot  = await loadRootOnce();
   const haveRoot  = !isZeroRoot(chainRoot);
 
+  // Quando a whitelist estiver desativada on-chain (root zero), não aprove por padrão.
   if (!haveRoot) {
-    return { ok: true, proof: [], chainRoot, fileRoot, rootMismatch: false };
+    return {
+      ok: false,
+      reason: "Whitelist disabled on-chain (merkleRoot is zero)",
+      proof: [],
+      chainRoot,
+      fileRoot,
+      rootMismatch: false
+    };
   }
 
   const proof = await getProofFast(provider, address);
@@ -273,6 +316,19 @@ export async function checkWhitelist(provider, address) {
     return {
       ok: false,
       reason: "Address not whitelisted (proof not found for this wallet)",
+      proof,
+      chainRoot,
+      fileRoot,
+      rootMismatch,
+    };
+  }
+
+  // ✅ valida a proof contra o root on-chain
+  const valid = verifyMerkleProof(address, proof, chainRoot);
+  if (!valid) {
+    return {
+      ok: false,
+      reason: "Invalid Merkle proof for this wallet (root mismatch)",
       proof,
       chainRoot,
       fileRoot,

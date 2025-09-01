@@ -5,8 +5,8 @@ import styles from "@/styles/Global.module.css";
 import { FiCheck, FiX } from "react-icons/fi";
 import LimitChecker from "@/components/wallet/LimitChecker";
 
-// ✅ usa a mesma fonte (serviço único)
-import { useWhitelist, preloadProofs } from "@/services/whitelistService";
+// ✅ mesma fonte/caches do serviço
+import { useWhitelist, preloadProofs, isZeroRoot } from "@/services/whitelistService";
 import * as core from "@/services/vaultCore";
 import { useContractContext } from "@/contexts/ContractContext";
 
@@ -65,7 +65,10 @@ export default function WalletChecker({ address, compact = false, onResult, clas
   const readProvider = useMemo(() => ctxProvider || core.getDefaultProvider?.(), [ctxProvider]);
 
   // usa a mesma lógica/caches do whitelistService
-  const { loading, ok: eligible, proof, error } = useWhitelist(effectiveAddress, readProvider);
+  const { loading, ok: eligible, proof, error, chainRoot } = useWhitelist(effectiveAddress, readProvider);
+
+  // whitelist on/off derivado do root on-chain
+  const whitelistOn = !!chainRoot && !isZeroRoot(chainRoot);
 
   // preload opcional (idempotente, single-flight)
   useEffect(() => { preloadProofs().catch(() => {}); }, []);
@@ -84,20 +87,29 @@ export default function WalletChecker({ address, compact = false, onResult, clas
   useEffect(() => {
     if (!effectiveAddress || !readProvider) return;
     if (loading) return;
+
+    // Se whitelist está desativada on-chain, não publicar elegível
+    if (!whitelistOn) {
+      publish(false);
+      return;
+    }
+
     if (eligible) publish(true, proof);
     else publish(false);
-  }, [effectiveAddress, readProvider, loading, eligible, proof, publish]);
+  }, [effectiveAddress, readProvider, loading, eligible, proof, publish, whitelistOn]);
 
-  // status derivado
+  // status derivado para UI
   const status = !effectiveAddress
     ? "idle"
     : loading
       ? "checking"
-      : eligible
-        ? "success"
-        : error
-          ? "error"
-          : "denied";
+      : !whitelistOn
+        ? "off"
+        : eligible
+          ? "success"
+          : error
+            ? "denied"
+            : "denied";
 
   const badgeStyle = useMemo(() => ({
     display: "inline-flex",
@@ -120,6 +132,13 @@ export default function WalletChecker({ address, compact = false, onResult, clas
         </div>
       );
     }
+    if (status === "off") {
+      return (
+        <div style={{ ...badgeStyle, color: "#8c6d1f" }} data-testid="wallet-status-off" aria-live="polite">
+          <FiX style={{ marginRight: 8 }} /> Whitelist is disabled on-chain <span style={{ opacity: 0.7 }}>({shorten(effectiveAddress)})</span>
+        </div>
+      );
+    }
     if (status === "success") {
       return (
         <div style={{ ...badgeStyle, color: "#0a7f55" }} data-testid="wallet-status-success" aria-live="polite">
@@ -130,14 +149,7 @@ export default function WalletChecker({ address, compact = false, onResult, clas
     if (status === "denied") {
       return (
         <div style={{ ...badgeStyle, color: "#c0392b" }} data-testid="wallet-status-denied" aria-live="polite">
-          <FiX style={{ marginRight: 8 }} /> Denied <span style={{ opacity: 0.7 }}>({shorten(effectiveAddress)})is not prehacked.</span>
-        </div>
-      );
-    }
-    if (status === "error") {
-      return (
-        <div style={{ ...badgeStyle, color: "#8c6d1f" }} data-testid="wallet-status-error" aria-live="polite">
-          <FiX style={{ marginRight: 8 }} /> Error <span style={{ opacity: 0.7 }}>({error})</span>
+          <FiX style={{ marginRight: 8 }} /> Denied <span style={{ opacity: 0.7 }}>({shorten(effectiveAddress)}) is not prehacked{error ? `: ${error}` : ""}.</span>
         </div>
       );
     }
@@ -146,7 +158,8 @@ export default function WalletChecker({ address, compact = false, onResult, clas
 
   return (
     <div className={`${styles.contractLimitsCard} ${className || ""}`}>
-      <LimitChecker address={address} />
+      {/* use o mesmo endereço efetivo do checker */}
+      <LimitChecker address={effectiveAddress} />
       {ui}
       {/* Opcional: detalhes da prova */}
       {/* {status === "success" && <pre className={styles.smallMuted}>{JSON.stringify(proof, null, 2)}</pre>} */}
@@ -154,14 +167,14 @@ export default function WalletChecker({ address, compact = false, onResult, clas
   );
 }
 
-// Utilidade programática usando a mesma fonte
-export async function isWalletEligible(address) {
-  if (!address) return { eligible: false };
+// Utilidade programática usando a mesma fonte (agora precisa do provider)
+export async function isWalletEligible(address, provider) {
+  if (!address || !provider) return { eligible: false, error: "address/provider missing" };
   try {
     await preloadProofs();
-    // reusa a função de “fast proof” se precisar
-    // mas como não temos provider aqui, apenas indicamos elegibilidade via hook no componente
-    return { eligible: true }; // use o componente para prova concreta
+    // use o mesmo serviço para validar (inclui verificação de merkle e root zero)
+    const { ok, proof, chainRoot, fileRoot, rootMismatch, reason } = await (await import("@/services/whitelistService")).checkWhitelist(provider, address);
+    return { eligible: !!ok, proof, chainRoot, fileRoot, rootMismatch, reason };
   } catch (err) {
     console.error("[WalletChecker] isWalletEligible error:", err);
     return { eligible: false, error: err?.message || "Unknown error" };
