@@ -1,6 +1,100 @@
 // src/services/adminService.js
-import { getWriteContract } from "@/services/vaultCore";
+import { Contract } from "ethers";
+import { getWriteContract, getReadContract } from "@/services/vaultCore";
 
+// --- ABI mínimo p/ oracles que expõem latestPrice() (int256,uint8) ---
+const IORACLE_ABI = [
+  {
+    inputs: [],
+    name: "latestPrice",
+    outputs: [
+      { internalType: "int256", name: "price", decimals: undefined, type: "int256" },
+      { internalType: "uint8",  name: "decimals", type: "uint8" }
+    ],
+    stateMutability: "view",
+    type: "function"
+  }
+];
+
+// ---------- helpers ----------
+const b = (v) => {
+  try { return BigInt(v ?? 0n); } catch { return 0n; }
+};
+
+function sameAddr(a, b) {
+  if (!a || !b) return false;
+  return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
+async function readVaultBalances(contractLike) {
+  try {
+    const res = await contractLike.getVaultBalances();
+    // Pode vir como tupla [w,u] ou objeto { woneBalance, usdcBalance }
+    if (Array.isArray(res)) return { w: b(res[0]), u: b(res[1]) };
+    if (res && typeof res === "object") {
+      return { w: b(res.woneBalance), u: b(res.usdcBalance) };
+    }
+  } catch { /* ignore */ }
+  return { w: 0n, u: 0n };
+}
+
+function prettyRevert(e, fallback) {
+  const msg =
+    e?.reason ||
+    e?.shortMessage ||
+    e?.error?.message ||
+    e?.info?.error?.message ||
+    e?.data?.message ||
+    e?.message ||
+    fallback ||
+    "Transaction failed";
+  if (/Invalid oracle/i.test(msg)) return "Oracle inválido (latestPrice <= 0 ou ABI incompatível).";
+  if (/No funds/i.test(msg)) return "Cofre sem liquidez (wONE/USDC).";
+  if (/Round ID must increase/i.test(msg)) return "Round ID deve ser maior que o atual.";
+  if (/caller is not the owner/i.test(msg)) return "A conta conectada não é o owner do Vault.";
+  if (/missing revert data/i.test(msg)) return "Transação revertida pelo contrato (sem motivo detalhado).";
+  return msg;
+}
+
+async function preflightOracle(provider, oracleAddr) {
+  if (!oracleAddr || oracleAddr === "0x0000000000000000000000000000000000000000") {
+    throw new Error("Oracle não configurado");
+  }
+  const o = new Contract(oracleAddr, IORACLE_ABI, provider);
+  let price, dec;
+  try {
+    const r = await o.latestPrice();
+    // ethers v6: pode vir tuple ou objeto
+    price = r?.price ?? (Array.isArray(r) ? r[0] : r);
+    dec   = r?.decimals ?? (Array.isArray(r) ? r[1] : undefined);
+  } catch {
+    throw new Error("Oracle incompatível: método latestPrice() ausente ou revertendo");
+  }
+  const p = b(price);
+  if (p <= 0n) throw new Error("Invalid oracle");
+  return { price: p, decimals: Number(dec ?? 18) };
+}
+
+// Simula a chamada on-chain para capturar reverts sem gastar gas.
+// Usa provider.call com o `from` do signer, para satisfazer onlyOwner.
+async function simulateStartNewRound(contract, signer, nextRound) {
+  try {
+    const addr = await signer.getAddress();
+    const data = contract.interface.encodeFunctionData("startNewRound", [ nextRound ]);
+    const txReq = {
+      from: addr,
+      to: contract.target,         // ethers v6
+      data
+    };
+    await signer.provider.call(txReq);
+    // Se não reverteu, está OK
+  } catch (e) {
+    // Decodifica razão se possível
+    throw new Error(prettyRevert(e, "Simulação falhou (revert ao chamar startNewRound)"));
+  }
+}
+
+// -------- Admin API --------
 export async function setDailyLimit(signer, usdAmount){
   const v = getWriteContract(signer);
   const tx = await v.setDailyLimit(usdAmount);
@@ -25,10 +119,14 @@ export async function setFixedUsdPrice(signer, token, usdPrice18){
   return await tx.wait();
 }
 
-export async function setLocked(signer, status){
-  const v = getWriteContract(signer);
-  const tx = await v.setLocked(status);
-  return await tx.wait();
+export async function setLocked(signer, status) {
+  if (!signer) throw new Error("Signer não disponível");
+  const c = getWriteContract(signer);
+  try {
+    return await c.setLocked(Boolean(status));
+  } catch (e) {
+    throw new Error(prettyRevert(e, "Falha ao atualizar lock"));
+  }
 }
 
 export async function setMerkleRoot(signer, root){
@@ -55,22 +153,79 @@ export async function setSupportedToken(signer, token, allowed){
   return await tx.wait();
 }
 
-export async function startNewRound(signer, roundId){
-  const v = getWriteContract(signer);
-  const tx = await v.startNewRound(roundId);
-  return await tx.wait();
+export async function startNewRound(signer, roundId) {
+  if (!signer) throw new Error("Signer não disponível");
+
+  const c = getWriteContract(signer);
+  const provider = signer.provider;
+  if (!provider) throw new Error("Provider do signer indisponível");
+
+  // 0) opcional: confirma owner
+  try {
+    const [owner, me] = await Promise.all([c.owner(), signer.getAddress()]);
+    if (!sameAddr(owner, me)) {
+      throw new Error(`A conta conectada não é o owner.\nOwner: ${owner}\nVocê:  ${me}`);
+    }
+  } catch {
+    // se falhar a leitura, seguimos (onlyOwner vai proteger)
+  }
+
+  // 1) Ler estado atual
+  const [currentRound, balances, oracleAddr] = await Promise.all([
+    c.currentRound().catch(() => 0n),
+    readVaultBalances(c),
+    c.oracle().catch(() => null),
+  ]);
+
+  const curr = b(currentRound);
+  const next = b(roundId);
+
+  // 2) Validar roundId > currentRound
+  if (next <= curr) {
+    throw new Error(`Round ID deve ser maior que o atual (${curr}). Sugestão: ${curr + 1n}`);
+  }
+
+  // 3) Validar liquidez do cofre (wONE/USDC)
+  const { w, u } = balances;
+  if (w === 0n && u === 0n) {
+    throw new Error("Cofre sem liquidez (wONE/USDC). Deposite fundos antes de iniciar um novo round.");
+  }
+
+  // 4) Pré-checar oracle (contrato exige latestPrice() > 0)
+  await preflightOracle(provider, oracleAddr);
+
+  // 5) (Opcional, seguro) Simular chamada para capturar revert antes do envio
+  //    Evita dependência de c.estimateGas.* que pode não existir em alguns runners.
+  await simulateStartNewRound(c, signer, next);
+
+  // 6) Enviar tx
+  try {
+    // Se a sua ABI estiver desatualizada e não tiver startNewRound,
+    // isso geraria "c.startNewRound is not a function". Atualize a ABI do Vault.
+    const tx = await c.startNewRound(next);
+    return tx; // o caller decide aguardar o receipt
+  } catch (e) {
+    throw new Error(prettyRevert(e, "Falha ao iniciar novo round"));
+  }
 }
 
-// Toggle round delay (enable/disable)
+export async function suggestNextRoundId(providerOrSigner) {
+  const c = providerOrSigner && providerOrSigner.provider
+    ? await getReadContract(providerOrSigner.provider)
+    : await getReadContract(providerOrSigner);
+  const curr = await c.currentRound();
+  return (BigInt(curr ?? 0n) + 1n).toString();
+}
+
+// Toggle round delay (enable/disable) — só se o contrato expuser esse setter
 export async function setRoundDelayEnabled(signer, enabled) {
   if (!signer) throw new Error("Signer required");
-  const c = await (getWriteContract ? getWriteContract(signer) : null);
-  if (!c || typeof c.setRoundDelayEnabled !== "function") {
+  const c = getWriteContract(signer);
+  if (typeof c.setRoundDelayEnabled !== "function") {
     throw new Error("Contract method setRoundDelayEnabled not available");
   }
   return await c.setRoundDelayEnabled(Boolean(enabled));
 }
-
 
 export async function transferOwnership(signer, newOwner){
   const v = getWriteContract(signer);
