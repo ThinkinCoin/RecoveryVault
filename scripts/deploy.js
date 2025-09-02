@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-// scripts/deploy.js
 /* eslint-disable no-console */
-const { ethers, run, network } = require('hardhat');
+const { ethers, run } = require('hardhat');
 const config = require('./config.json');
 
 const HARMONY_CHAIN_ID = 1666600000n;
@@ -12,20 +11,14 @@ function roundUpToGwei(v) {
   return ((x + ONE_GWEI - 1n) / ONE_GWEI) * ONE_GWEI;
 }
 function bump(value, num = 125n, den = 100n) {
-  // ~ +25%
-  return (BigInt(value) * num) / den;
+  return (BigInt(value) * num) / den; // ~ +25%
 }
 
 async function pickLegacyFees(provider) {
-  // Try feeData.gasPrice -> bump -> round; fallback to 200 gwei
   const fee = await provider.getFeeData().catch(() => ({}));
   const base = fee?.gasPrice != null ? BigInt(fee.gasPrice) : 0n;
-
-  // sane floor for Harmony (adjust if needed)
-  const floor = ethers.parseUnits('200', 'gwei'); // 200 gwei
+  const floor = ethers.parseUnits('200', 'gwei'); // ajuste se necessário
   let gasPrice = base > 0n ? bump(base) : floor;
-
-  // ensure >= floor and rounded in gwei
   gasPrice = roundUpToGwei(gasPrice < floor ? floor : gasPrice);
   return { gasPrice, type: 0 }; // legacy
 }
@@ -35,16 +28,18 @@ async function estimateDeployGas(deployer, txReq, overrides = {}) {
     const req = { ...txReq, ...overrides, from: await deployer.getAddress() };
     const est = await deployer.estimateGas(req);
     return (est * 120n) / 100n; // +20%
-  } catch (err) {
-    console.warn('⚠️ estimateGas failed or not supported, using fallback 5,000,000');
+  } catch {
+    console.warn('⚠️ estimateGas falhou, usando fallback 5,000,000');
     return 5_000_000n;
   }
 }
 
+function toLower(a) { return (a || '').toString().toLowerCase(); }
+
 async function main() {
   const [deployer] = await ethers.getSigners();
   if (!deployer) {
-    console.error('❌ No deployer account found. Check network configuration.');
+    console.error('❌ Sem deployer. Confira a config da network.');
     process.exit(1);
   }
 
@@ -59,32 +54,37 @@ async function main() {
   const wONE = config.RECOVERY?.wONE;
   const peggedUSDC = config.RECOVERY?.peggedUSDC;
   const oracleAddress = config.RECOVERY?.oracle;
-  const dailyLimitUsd = ethers.parseUnits(config.RECOVERY?.dailyLimitUsd || '100', 18);
+
+  // dailyLimitUsd no contrato é inteiro (USD sem decimais).
+  // Se o seu config guarda como "100" (sem casas), pode usar direto como BigInt.
+  // Se prefere manter como string, também funciona.
+  const dailyLimitUsd =
+    config.RECOVERY?.dailyLimitUsd != null
+      ? BigInt(String(config.RECOVERY.dailyLimitUsd))
+      : 100n;
 
   const rawTokens = config.RECOVERY?.supportedTokens || [];
   const supportedTokens = [...new Set(
     rawTokens.filter((addr) => {
       if (!addr) return false;
       const valid = ethers.isAddress(addr);
-      if (!valid) console.warn(`⚠️ Invalid token skipped: ${addr}`);
+      if (!valid) console.warn(`⚠️ Token inválido ignorado: ${addr}`);
       return valid;
     })
   )];
 
   if (!supportedTokens.length) {
-    console.error('❌ No valid supported token addresses found. Aborting.');
+    console.error('❌ Nenhum token suportado válido. Abortando.');
     process.exit(1);
   }
 
   const Factory = await ethers.getContractFactory('RecoveryVault');
 
-  // === fee overrides ===
+  // --- Fee overrides (mantido como estava) ---
   let feeOverrides = {};
   if (isHarmony) {
-    // Harmony is safest with legacy gas
     feeOverrides = await pickLegacyFees(ethers.provider);
   } else {
-    // Non-Harmony: try EIP-1559 first, fallback to legacy
     const fee = await ethers.provider.getFeeData().catch(() => ({}));
     if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
       const mfp = roundUpToGwei(bump(fee.maxFeePerGas));
@@ -95,8 +95,8 @@ async function main() {
     }
   }
 
-  // === gasLimit estimate ===
-  console.log('🚀 Deploying RecoveryVault with owner:', initialOwner);
+  // --- Deploy ---
+  console.log('🚀 Deploying RecoveryVault com owner:', initialOwner);
   const deployTxReq = Factory.getDeployTransaction(
     initialOwner,
     devWallet,
@@ -107,10 +107,7 @@ async function main() {
     dailyLimitUsd,
     oracleAddress
   );
-
   const gasLimit = await estimateDeployGas(deployer, deployTxReq, feeOverrides);
-
-  // === send deployment ===
   const overrides = { ...feeOverrides, gasLimit };
 
   console.log(
@@ -134,7 +131,6 @@ async function main() {
   );
 
   await vault.waitForDeployment();
-
   const address = await vault.getAddress();
   console.log(`✅ Deployed RecoveryVault at ${address}`);
 
@@ -142,7 +138,57 @@ async function main() {
   const depTx = await vault.deploymentTransaction();
   await depTx.wait(confirmations);
 
-  // Optional: Verify
+  // --- (NOVO) Configurar fixedUsdPrice para tokens suportados ---
+  // Espera-se no config:
+  // RECOVERY.fixedPrices: {
+  //   "0xTokenA": "1.00",
+  //   "0xTokenB": "0.5"
+  // }
+  const fixedPrices = config.RECOVERY?.fixedPrices || {};
+  const hasFixed = fixedPrices && typeof fixedPrices === 'object' && Object.keys(fixedPrices).length > 0;
+
+  if (hasFixed) {
+    console.log('🧩 Configurando fixedUsdPrice...');
+    // Mapa rápido pra checar se o token está em supportedTokens
+    const allowed = new Set(supportedTokens.map(toLower));
+    for (const [tokenAddr, priceStr] of Object.entries(fixedPrices)) {
+      if (!ethers.isAddress(tokenAddr)) {
+        console.warn(`⚠️ fixedPrices: endereço inválido ignorado: ${tokenAddr}`);
+        continue;
+      }
+      if (!allowed.has(toLower(tokenAddr))) {
+        console.warn(`⚠️ fixedPrices: ${tokenAddr} não está em supportedTokens; ignorando.`);
+        continue;
+      }
+      const raw = String(priceStr ?? '').trim();
+      if (!raw) {
+        console.warn(`⚠️ fixedPrices: valor vazio para ${tokenAddr}; ignorando.`);
+        continue;
+      }
+      // O contrato espera 18 decimais (USD * 1e18 por 1 token)
+      // Aceitamos "1", "1.0", "0.5" etc. e convertemos para 1e18.
+      let usdPrice18;
+      try {
+        usdPrice18 = ethers.parseUnits(raw, 18);
+      } catch (e) {
+        console.warn(`⚠️ fixedPrices: valor inválido "${raw}" para ${tokenAddr}; ignorando.`);
+        continue;
+      }
+
+      try {
+        const tx = await vault.setFixedUsdPrice(tokenAddr, usdPrice18, overrides);
+        console.log(` → setFixedUsdPrice(${tokenAddr}, ${usdPrice18.toString()}) tx=${tx.hash}`);
+        await tx.wait(confirmations);
+      } catch (e) {
+        console.warn(`⚠️ Falha ao setFixedUsdPrice(${tokenAddr}):`, e?.reason || e?.message || e);
+      }
+    }
+    console.log('✅ fixedUsdPrice configurado (quando aplicável).');
+  } else {
+    console.log('ℹ️ Nenhum fixedPrices definido no config. Pulando etapa.');
+  }
+
+  // --- Verify (opcional) ---
   try {
     await run('verify:verify', {
       address,
