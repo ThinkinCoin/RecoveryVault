@@ -1,6 +1,6 @@
 // src/services/adminService.js
 import { Contract } from "ethers";
-import { getWriteContract, getReadContract } from "@/services/vaultCore";
+import { getWriteContract, getReadContract, parseUsdToUsd4BigInt  } from "@/services/vaultCore";
 
 // --- ABI mínimo p/ oracles que expõem latestPrice() (int256,uint8) ---
 const IORACLE_ABI = [
@@ -53,6 +53,9 @@ function prettyRevert(e, fallback) {
   if (/Round ID must increase/i.test(msg)) return "Round ID deve ser maior que o atual.";
   if (/caller is not the owner/i.test(msg)) return "A conta conectada não é o owner do Vault.";
   if (/missing revert data/i.test(msg)) return "Transação revertida pelo contrato (sem motivo detalhado).";
+  if (/Round not initialized/i.test(msg)) return "Round ainda não inicializado.";
+  if (/Unsupported valuation/i.test(msg)) return "Valoração de token não suportada (ajuste oracle/preço fixo).";
+
   return msg;
 }
 
@@ -95,9 +98,15 @@ async function simulateStartNewRound(contract, signer, nextRound) {
 }
 
 // -------- Admin API --------
-export async function setDailyLimit(signer, usdAmount){
+export async function setDailyLimit(signer, amountLike){
+  if (!signer) throw new Error("Signer não disponível");
   const v = getWriteContract(signer);
-  const tx = await v.setDailyLimit(usdAmount);
+  // se vier bigint já em USD4, usamos; senão, convertemos string/number -> USD4
+  const usd4 =
+    typeof amountLike === "bigint"
+      ? amountLike
+      : parseUsdToUsd4BigInt(amountLike);
+  const tx = await v.setDailyLimit(usd4);
   return await tx.wait();
 }
 
@@ -217,14 +226,14 @@ export async function suggestNextRoundId(providerOrSigner) {
   return (BigInt(curr ?? 0n) + 1n).toString();
 }
 
-// Toggle round delay (enable/disable) — só se o contrato expuser esse setter
 export async function setRoundDelayEnabled(signer, enabled) {
-  if (!signer) throw new Error("Signer required");
+  if (!signer) throw new Error("Signer não disponível");
   const c = getWriteContract(signer);
   if (typeof c.setRoundDelayEnabled !== "function") {
     throw new Error("Contract method setRoundDelayEnabled not available");
   }
-  return await c.setRoundDelayEnabled(Boolean(enabled));
+  // manter sem wait(), como setLocked
+  return c.setRoundDelayEnabled(Boolean(enabled));
 }
 
 export async function transferOwnership(signer, newOwner){

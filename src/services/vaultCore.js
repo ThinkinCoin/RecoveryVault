@@ -11,6 +11,23 @@ const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)"
 ];
 
+// ===== USD4 helpers =====
+export const USD_SCALE_BI = 10000n; // 1e4
+export function parseUsdToUsd4BigInt(input) {
+  // "100.1234" -> 1001234n
+  const s = String(input ?? "").trim().replace(",", ".");
+  if (!s) return 0n;
+  const [intPart, fracRaw = ""] = s.split(".");
+  const frac = (fracRaw + "0000").slice(0, 4); // pad para 4 casas
+  const bi = BigInt(intPart || "0") * USD_SCALE_BI + BigInt(frac || "0");
+  return bi;
+}
+
+export async function setDailyLimit(signer, usd4BigInt){
+  const v = getWriteContract(signer);
+  return await v.setDailyLimit(usd4BigInt);
+}
+
 function b(v){ return BigInt(v); }
 function n(v){ return Number(v); }
 function bool(v){ return Boolean(v); }
@@ -120,15 +137,24 @@ export async function redeemedInRound(p, roundId, wallet){
 
 export async function quoteRedeem(p, user, tokenIn, amountIn, redeemIn, proof = []) {
   const v = await getReadContract(p);
-  const r = await v.quoteRedeem(user, tokenIn, amountIn, redeemIn, Array.isArray(proof) ? proof : []);
+  const r = await v.quoteRedeem(
+    user,
+    tokenIn,
+    amountIn,
+    redeemIn,
+    Array.isArray(proof) ? proof : []
+  );
   return {
     whitelisted:        bool(r[0]),
     roundIsActive:      bool(r[1]),
     feeAmountInTokenIn: b(r[2]),
     burnAmountInTokenIn:b(r[3]),
-    userLimitUsdBefore: b(r[4]),
-    userLimitUsdAfter:  b(r[5]),
-    usdValueIn:         b(r[6]),
+    userLimitUsdBefore: b(r[4]),   
+    userLimitUsdAfter:  b(r[5]),   
+    usdValueIn:         b(r[6]),   
+    limitBefore4:       b(r[4]),
+    limitAfter4:        b(r[5]),
+    usdValueIn4:        b(r[6]),
     tokenInDecimals:    n(r[7]),
     redeemInDecimals:   n(r[8]),
     oraclePrice:        b(r[9]),

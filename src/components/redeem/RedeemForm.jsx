@@ -161,8 +161,8 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
 
   const [fixedPriceText, setFixedPriceText] = useState("");
 
-  const [limitUSD18, setLimitUSD18] = useState(0n);
-  const [amountUSD18, setAmountUSD18] = useState(0n);
+  const [limitUSD4, setLimitUSD4] = useState(0n);   // USD * 1e4
+  const [amountUSD4, setAmountUSD4] = useState(0n);
 
   const [receivePreview, setReceivePreview] = useState(null);
 
@@ -261,10 +261,12 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
 
   const getCachedUserLimit = useCallback(async (wallet) => {
     const now = Date.now();
-    if (userLimitCacheRef.current.value && now - userLimitCacheRef.current.ts < USERLIMIT_TTL_MS) return userLimitCacheRef.current.value;
-    const val = await core.getUserLimit(readProvider, wallet).catch(() => ({ remainingUSD: 0n }));
+    if (userLimitCacheRef.current.value && now - userLimitCacheRef.current.ts < USERLIMIT_TTL_MS) {
+      return userLimitCacheRef.current.value; // { remainingUSD }
+    }
+    const val = await core.getUserLimitObject(readProvider, wallet).catch(() => ({ remainingUSD: 0n }));
     userLimitCacheRef.current = { ts: now, value: val };
-    return val;
+    return val; // { remainingUSD: <USD4> }
   }, [readProvider]);
 
 
@@ -413,7 +415,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
     (async () => {
       try {
         setReceivePreview(null);
-        setAmountUSD18(0n);
+        setAmountUSD4(0n);
 
         if (!readProvider || !address || !tokenIn || !redeemIn) return;
         if (!debouncedAmount || Number(debouncedAmount) <= 0) return;
@@ -425,9 +427,8 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
           setUiNotice(null);
         }
 
-        const { remainingUSD: remainingInt } = await getCachedUserLimit(address);
-        const remainingUSD18 = BigInt(remainingInt ?? 0n);
-        if (!cancelled && runId === runIdRef.current) setLimitUSD18(remainingUSD18);
+        const { remainingUSD: remaining4 } = await getCachedUserLimit(address); // USD * 1e4
+        if (!cancelled && runId === runIdRef.current) setLimitUSD4(BigInt(remaining4 ?? 0n));        
 
         const chainPromise = (async () => {
           try {
@@ -509,8 +510,8 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
             }
 
             if (!cancelled && runId === runIdRef.current) {
-              // Use usdOut18 (output-based) as the amount that consumes the daily limit
-              setAmountUSD18(usdOut18);
+              const usdOut4 = (usdOut18 * 10_000n) / (10n ** 18n);
+              setAmountUSD4(usdOut4);
               setReceivePreview({
                 raw: amountOut,
                 decimals: outDec,
@@ -520,8 +521,8 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
                 maxOut: amountOut,
                 roundIsActive: true,
                 whitelisted: !!(wlProof && wlProof.length),
-                userLimitUsdAfter: null,
-                usdOut18 // helpful for debugging/render if you want
+                userLimitUsdAfter: null, // sem after local; usaremos comparação no botão
+                usdOut18
               });
             }
           } catch {}
@@ -536,8 +537,8 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
               : 18;
           const outSym = (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase()) ? "USDC" : "wONE";
           if (!cancelled && runId === runIdRef.current) {
-            // Derive usdOut18 from on-chain amountOut
-            let usdOut18 = 0n;
+            // Derive usdOut18/usdOut14 from on-chain amountOut
+            let usdOut4 = 0n, usdOut18 = 0n;
             const amountOut = BigInt(q.amountOutRedeemToken ?? 0n);
             const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
             if (outIsUSDC) {
@@ -549,14 +550,17 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
                 usdOut18 = amountOut * price18 / 10n ** 18n;
               }
             }
+          // contrato usa USD4 -> converta
+          usdOut4 = (usdOut18 * 10_000n) / (10n ** 18n);
 
             // Prefer on-chain userLimitUsdAfter; fallback to remaining - usdOut18
-            const onChainAfter = q.userLimitUsdAfter != null ? BigInt(q.userLimitUsdAfter) : null;
-            const after = onChainAfter != null ? onChainAfter
-                        : (remainingUSD18 > usdOut18 ? (remainingUSD18 - usdOut18) : 0n);
+            const onChainAfter4 = q.userLimitUsdAfter != null ? BigInt(q.userLimitUsdAfter) : null;
+            const after4 = onChainAfter4 != null ? onChainAfter4
+                        : (BigInt(remaining4 ?? 0n) > usdOut4 ? (BigInt(remaining4 ?? 0n) - usdOut4) : 0n);
 
-            setAmountUSD18(usdOut18);
-            setLimitUSD18(BigInt(q.userLimitUsdBefore ?? remainingUSD18));
+
+            setAmountUSD4(usdOut4);
+            setLimitUSD4(BigInt(q.userLimitUsdBefore ?? remaining4));
             setReceivePreview({
               raw: amountOut,
               decimals: outDec,
@@ -566,8 +570,8 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
               maxOut: amountOut,
               roundIsActive: !!q.roundIsActive,
               whitelisted: !!q.whitelisted,
-              userLimitUsdAfter: after,
-              usdOut18
+              userLimitUsdAfter: after4, // USD4
+              usdOut18,
             });
           }
         } else {
@@ -580,7 +584,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
                 ? usdcDecimals
                 : 18;
             const outSym = (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase()) ? "USDC" : "wONE";
-            let usdOut18 = 0n;
+            let usdOut18 = 0n, usdOut4 = 0n;
             const amountOut = BigInt(qLater.amountOutRedeemToken ?? 0n);
             const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
             if (outIsUSDC) {
@@ -592,12 +596,14 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
                 usdOut18 = amountOut * price18 / 10n ** 18n;
               }
             }
-            const onChainAfter = qLater.userLimitUsdAfter != null ? BigInt(qLater.userLimitUsdAfter) : null;
-            const after = onChainAfter != null ? onChainAfter
-                        : (remainingUSD18 > usdOut18 ? (remainingUSD18 - usdOut18) : 0n);
+            usdOut4 = (usdOut18 * 10_000n) / (10n ** 18n);
+            const onChainAfter4 = qLater.userLimitUsdAfter != null ? BigInt(qLater.userLimitUsdAfter) : null;
+            const after4 = onChainAfter4 != null ? onChainAfter4
+                        : (BigInt(remaining4 ?? 0n) > usdOut4 ? (BigInt(remaining4 ?? 0n) - usdOut4) : 0n);
 
-            setAmountUSD18(usdOut18);
-            setLimitUSD18(BigInt(qLater.userLimitUsdBefore ?? remainingUSD18));
+
+            setAmountUSD4(usdOut4);
+            setLimitUSD4(BigInt(qLater.userLimitUsdBefore ?? remaining4));
             setReceivePreview({
               raw: amountOut,
               decimals: outDec,
@@ -607,7 +613,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
               maxOut: amountOut,
               roundIsActive: !!qLater.roundIsActive,
               whitelisted: !!qLater.whitelisted,
-              userLimitUsdAfter: after,
+              userLimitUsdAfter: after4,
               usdOut18
             });
           }
@@ -623,8 +629,8 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
     try {
       const bal = BigInt(selectedBalance ?? 0n);
       const dec = BigInt(selectedDecimals ?? 18);
-      const remain = BigInt(limitUSD18 ?? 0n);
-      if (!tokenIn || remain <= 0n) {
+      const remain4 = BigInt(limitUSD4 ?? 0n);
+      if (!tokenIn || remain4 <= 0n) {
         setAmountHuman(formatUnits(bal, Number(dec)));
         return;
       }
@@ -641,12 +647,16 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
         if (fp > 0n) price18 = fp;
       }
       let byLimit = 0n;
-      if (price18 > 0n) byLimit = remain * 10n ** dec / price18;
+      if (price18 > 0n) {
+        const remain18 = remain4 * 100_000_000_000_000n; // 1e14 para converter USD4 -> USD18
+        byLimit = (remain18 * 10n ** dec) / price18;
+      }
       const maxTok = byLimit > 0n ? (bal < byLimit ? bal : byLimit) : bal;
       const human = formatUnits(maxTok, Number(dec));
       setAmountHuman(human);
     } catch {}
-  }, [selectedBalance, selectedDecimals, limitUSD18, tokenIn, usdc, wone, getCachedOracle, getCachedFixedPrice]);
+  }, [selectedBalance, selectedDecimals, limitUSD4, tokenIn, usdc, wone, getCachedOracle, getCachedFixedPrice]);
+
 
   const onConfirm = useCallback(async () => {
     try {
@@ -690,9 +700,9 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
 
       try {
         userLimitCacheRef.current = { ts: 0, value: null };
-        const { remainingUSD } = await getCachedUserLimit(address);
-        setLimitUSD18(BigInt(remainingUSD ?? 0n));
-        setAmountUSD18(0n);
+        const { remainingUSD } = await getCachedUserLimit(address); // USD4
+        setLimitUSD4(BigInt(remainingUSD ?? 0n));
+        setAmountUSD4(0n);
         oracleCacheRef.current = { ts: 0, value: null };
         roundCacheRef.current = { ts: 0, value: null };
         const ri2 = await getCachedRoundInfo();
@@ -746,14 +756,14 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
     if (!roundActive) return true;
     if (!receivePreview || receivePreview.raw === 0n) return true;
     if (receivePreview?.userLimitUsdAfter != null) {
-      const after = BigInt(receivePreview.userLimitUsdAfter);
-      if (after <= 0n) return true;
+      const after4 = BigInt(receivePreview.userLimitUsdAfter);
+      if (after4 <= 0n) return true;
     } else {
-      if (amountUSD18 === 0n) return true;
-      if (limitUSD18 !== 0n && amountUSD18 >= limitUSD18) return true;
+      if (amountUSD4 === 0n) return true;
+      if (limitUSD4 !== 0n && amountUSD4 >= limitUSD4) return true;
     }
     return false;
-  }, [busy, isConnected, address, ctxSigner, tokenIn, redeemIn, debouncedAmount, wlLoading, wlOk, amountUSD18, limitUSD18, receivePreview, isValidHuman, roundActive]);
+  }, [busy, isConnected, address, ctxSigner, tokenIn, redeemIn, debouncedAmount, wlLoading, wlOk, amountUSD4, limitUSD4, receivePreview, isValidHuman, roundActive]);
 
   const isLoading = loadingBase || loadingBalances;
   const bootBusy = loadingBase || loadingBalances || wlLoading;

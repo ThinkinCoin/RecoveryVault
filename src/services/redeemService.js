@@ -42,6 +42,12 @@ const VAULT_ERROR_IFACE = new Interface([
   "error DoNotSendONEWithERC20()",
 ]);
 
+// === USD4 helpers ===
+const USD_SCALE_BI = 10_000n; // 1e4
+function usd18ToUsd4(usd18) {
+  return (BigInt(usd18) * USD_SCALE_BI) / (10n ** 18n);
+}
+
 const TTL = { ADDR: 60_000, DEC: 300_000, ORACLE: 30_000, FEES: 300_000 };
 const addrCache = new Map();
 const decCache = new Map();
@@ -262,20 +268,20 @@ export async function computeUsd18(provider, tokenIn, amountRaw) {
     if (price <= 0n) return { usd18: 0n, oracle: null };
     const one18 = (amt * (10n ** 18n)) / (10n ** BigInt(dec));
     const usd18 = (one18 * price) / (10n ** BigInt(odec));
-    return { usd18, oracle };
+    return { usd18, usd4: usd18ToUsd4(usd18), oracle };
   }
 
   if (usdcAddr && String(tokenIn).toLowerCase() === String(usdcAddr).toLowerCase()) {
     const usdcDec = await getTokenDecimals(provider, usdcAddr).catch(() => 6);
     const usd18 = (amt * (10n ** 18n)) / (10n ** BigInt(usdcDec));
-    return { usd18, oracle: null };
+    return { usd18, usd4: usd18ToUsd4(usd18), oracle: null };
   }
 
   const px18 = await fixedUsdPrice(provider, tokenIn).catch(() => 0n);
   if (px18 <= 0n) return { usd18: 0n, oracle: null };
   const dec = await getTokenDecimals(provider, tokenIn).catch(() => 18);
   const usd18 = (amt * BigInt(px18)) / (10n ** BigInt(dec));
-  return { usd18, oracle: null };
+  return { usd18, usd4: usd18ToUsd4(usd18), oracle: null };
 }
 
 export async function usd18ToOut(provider, usd18, outToken, opts = {}) {
@@ -315,7 +321,7 @@ export async function buildQuote(provider, tokenIn, amountHuman, outToken) {
   let amountIn;
   try { amountIn = parseUnits(sanitized, inDec); } catch { return { ok: false }; }
   if (amountIn <= 0n) return { ok: false };
-  const { usd18, oracle } = await computeUsd18(provider, tokenIn, amountIn);
+  const { usd18, usd4, oracle } = await computeUsd18(provider, tokenIn, amountIn);
   if (usd18 <= 0n) return { ok: false };
   const outRaw = await usd18ToOut(provider, usd18, outToken, { oracle });
   if (outRaw <= 0n) return { ok: false };
@@ -328,28 +334,34 @@ export async function buildQuote(provider, tokenIn, amountHuman, outToken) {
     tokenIn: { address: tokenIn, decimals: inDec, symbol: inSym },
     tokenOut: { address: outToken, decimals: outDec, symbol: outSym },
     usd18,
+    usd4,
     outRaw,
   };
 }
 
 export async function localQuote(provider, tokenIn, amountIn) {
-  const { usd18 } = await computeUsd18(provider, tokenIn, amountIn);
+  const { usd18, usd4 } = await computeUsd18(provider, tokenIn, amountIn);
   const { thresholds = [], bps = [] } = await getFeeTiers(provider).catch(() => ({ thresholds: [], bps: [] }));
   const thr = thresholds;
   const feeBps = bps.map((x) => BigInt(x));
-  const usdInt = usd18 / (10n ** 18n);
-
+  const usd4Thr = thr.map((t) => BigInt(t ?? 0n) * USD_SCALE_BI);
   let chosenBps = 0n;
-  for (let i = 0; i < thr.length; i++) {
-    const t = thr[i] ?? 0n;
-    if (usdInt <= t) { chosenBps = feeBps[i] ?? 0n; break; }
+  for (let i = 0; i < usd4Thr.length; i++) {
+    const t4 = usd4Thr[i] ?? 0n;
+    if (usd4 <= t4) { chosenBps = feeBps[i] ?? 0n; break; }
   }
-  if (chosenBps === 0n) chosenBps = feeBps[(feeBps.length || 1) - 1] || 0n;
+  if (chosenBps === 0n) chosenBps = feeBps[(feeBps.length || 1) - 1] || 0n;  
 
   const fee = (BigInt(amountIn) * chosenBps) / 10000n;
   const refund = BigInt(amountIn) - fee;
-
-  return { usd18, usdInt, bps: Number(chosenBps), fee, refund };
+  return {
+      usd18,
+      usd4,                 // USD * 1e4 (mesma granularidade do contrato)
+      usdInt: usd18 / (10n ** 18n), // mantemos se alguém no UI ainda usa inteiro
+      bps: Number(chosenBps),
+      fee,
+      refund
+    };
 }
 
 export async function approveIfNeeded(signer, token, owner, spender, amount) {
