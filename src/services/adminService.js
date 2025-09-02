@@ -1,4 +1,4 @@
-// src/services/vaultAdmin.js
+// src/services/adminService.js
 import { getWriteContract } from "@/services/vaultCore";
 
 export async function setDailyLimit(signer, usdAmount){
@@ -60,6 +60,17 @@ export async function startNewRound(signer, roundId){
   const tx = await v.startNewRound(roundId);
   return await tx.wait();
 }
+
+// Toggle round delay (enable/disable)
+export async function setRoundDelayEnabled(signer, enabled) {
+  if (!signer) throw new Error("Signer required");
+  const c = await (getWriteContract ? getWriteContract(signer) : null);
+  if (!c || typeof c.setRoundDelayEnabled !== "function") {
+    throw new Error("Contract method setRoundDelayEnabled not available");
+  }
+  return await c.setRoundDelayEnabled(Boolean(enabled));
+}
+
 
 export async function transferOwnership(signer, newOwner){
   const v = getWriteContract(signer);

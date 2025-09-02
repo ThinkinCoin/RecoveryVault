@@ -8,7 +8,8 @@ import styles from "@/styles/Global.module.css";
 import { useContractContext } from "@/contexts/ContractContext";
 import Footer from "@/ui/layout/footer";
 import WalletConnection from "@/components/wallet/WalletConnection";
-import * as vaultService from "@/services/vaultService";
+import * as adminService from "@/services/adminService";
+import { getReadContract } from "@/services/vaultCore"
 import { ethers } from "ethers";
 import { openConnect } from "@/services/appkit";
 
@@ -128,16 +129,19 @@ export default function AdminDash() {
   const [feeThresholds, setFeeThresholds] = useState([]);
   const [feeBps, setFeeBps] = useState([]);
 
+  // Round delay feature
+  const [roundDelayEnabled, setRoundDelayEnabled] = useState(false);
+
   // Forms state (basic)
   const [dailyLimit, setDailyLimit] = useState("");
   const [locked, setLocked] = useState(false);
   const [roundId, setRoundId] = useState("");
 
   // Tx states
-  const [busy, setBusy] = useState({ daily: false, lock: false, round: false, dev: false, rmc: false, oracle: false, merkle: false, token: false, tokenPrice: false, fee: false, wd: false, ownerXfer: false });
+  const [busy, setBusy] = useState({ daily: false, lock: false, round: false, dev: false, rmc: false, oracle: false, merkle: false, token: false, tokenPrice: false, fee: false, wd: false, ownerXfer: false, delay: false });
   const [notice, setNotice] = useState(null);
 
-  const provider = useMemo(() => ctxProvider || vaultService.getDefaultProvider?.() || null, [ctxProvider]);
+  const provider = useMemo(() => ctxProvider || adminService.getDefaultProvider?.() || null, [ctxProvider]);
   const canWrite = Boolean(ctxSigner);
 
   // --- Load basics from contract ---
@@ -145,7 +149,7 @@ export default function AdminDash() {
     try {
       setLoadingOwner(true);
       if (!provider) throw new Error("Provider not available");
-      const c = await vaultService.getReadContract(provider);
+      const c = await getReadContract(provider);
 
       // Connected account from context
       const acc = ctxAccount || "";
@@ -226,6 +230,13 @@ export default function AdminDash() {
         setFeeBps((prev) => prev.length ? prev : []);
       }
 
+      try {
+        if (typeof c.roundDelayEnabled === "function") {
+          const val = await c.roundDelayEnabled();
+          setRoundDelayEnabled(Boolean(val));
+        }
+      } catch {}
+
       setOwner(own);
       setAccount(acc);
       setIsOwner(toLower(acc) === toLower(own));
@@ -256,7 +267,7 @@ export default function AdminDash() {
     (async () => {
       if (!provider || !tokenSel) return;
       try {
-        const c = await vaultService.getReadContract(provider);
+        const c = await getReadContract(provider);
         const allowed = await c.supportedToken(tokenSel);
         setTokenAllowed(Boolean(allowed));
       } catch {}
@@ -268,7 +279,7 @@ export default function AdminDash() {
     (async () => {
       if (!provider || !tokenSel || !ethers.isAddress(tokenSel)) { setFixedPrice(""); return; }
       try {
-        const c = await vaultService.getReadContract(provider);
+        const c = await getReadContract(provider);
         const p = await c.fixedUsdPrice(tokenSel);
         const norm = ethers.formatUnits(p || 0n, 18);
         setFixedPrice((norm === "0.0" || norm === "0") ? "" : norm);
@@ -298,7 +309,7 @@ export default function AdminDash() {
       const { signer } = await requireOwnerAndSigner();
       const parsed = Math.floor(Number(String(dailyLimit).replace(/,/g, ".")));
       if (!Number.isFinite(parsed) || parsed < 0) throw new Error("Invalid amount");
-      const tx = await vaultService.setDailyLimit(signer, parsed);
+      const tx = await adminService.setDailyLimit(signer, parsed);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Daily limit updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setDailyLimit("");
@@ -313,7 +324,7 @@ export default function AdminDash() {
     setBusy((b) => ({ ...b, lock: true })); setNotice(null);
     try {
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setLocked(signer, !locked);
+      const tx = await adminService.setLocked(signer, !locked);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Lock status updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setLocked((v) => !v);
@@ -330,7 +341,7 @@ export default function AdminDash() {
       const { signer } = await requireOwnerAndSigner();
       const parsed = BigInt(Math.floor(Number(String(roundId).replace(/,/g, ""))));
       if (parsed <= 0n) throw new Error("Invalid round id");
-      const tx = await vaultService.startNewRound(signer, parsed);
+      const tx = await adminService.startNewRound(signer, parsed);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `New round scheduled. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setRoundId("");
@@ -347,7 +358,7 @@ export default function AdminDash() {
     try {
       if (!isAddr(devWallet)) throw new Error("Invalid dev wallet address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setDevWallet(signer, devWallet);
+      const tx = await adminService.setDevWallet(signer, devWallet);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Dev wallet updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -362,7 +373,7 @@ export default function AdminDash() {
     try {
       if (!isAddr(rmcWallet)) throw new Error("Invalid RMC wallet address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setRmcWallet(signer, rmcWallet);
+      const tx = await adminService.setRmcWallet(signer, rmcWallet);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `RMC wallet updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -377,7 +388,7 @@ export default function AdminDash() {
     try {
       if (!isAddr(oracleAddr)) throw new Error("Invalid oracle address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setOracle(signer, oracleAddr);
+      const tx = await adminService.setOracle(signer, oracleAddr);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Oracle updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -392,7 +403,7 @@ export default function AdminDash() {
     try {
       if (!isBytes32(merkleRoot)) throw new Error("Invalid merkle root (bytes32 hex)");
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setMerkleRoot(signer, merkleRoot);
+      const tx = await adminService.setMerkleRoot(signer, merkleRoot);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Merkle root updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -409,7 +420,7 @@ export default function AdminDash() {
       if (toLower(newOwner) === toLower(ethers.ZeroAddress)) throw new Error("New owner cannot be zero address");
       const { signer } = await requireOwnerAndSigner();
       const rc = await (async () => {
-        const tx = await vaultService.transferOwnership(signer, newOwner);
+        const tx = await adminService.transferOwnership(signer, newOwner);
         return await waitReceipt(tx, signer);
       })();
       setNotice({ type: "success", msg: `Ownership transferred. Tx: ${txHashOf(rc)}` });
@@ -427,7 +438,7 @@ export default function AdminDash() {
       const target = tokenInput || tokenSel;
       if (!isAddr(target)) throw new Error("Invalid token address");
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setSupportedToken(signer, target, tokenAllowed);
+      const tx = await adminService.setSupportedToken(signer, target, tokenAllowed);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Supported token updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setTokenInput("");
@@ -448,7 +459,7 @@ export default function AdminDash() {
       if (valStr === "") throw new Error("Enter a price (use 0 to clear)");
       const price18 = ethers.parseUnits(valStr, 18);
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setFixedUsdPrice(signer, target, price18);
+      const tx = await adminService.setFixedUsdPrice(signer, target, price18);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Fixed USD price updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -473,7 +484,7 @@ export default function AdminDash() {
       });
       if (bps.length !== th.length + 1) throw new Error("BPS must be thresholds.length + 1");
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.setFeeTiers(signer, th, bps);
+      const tx = await adminService.setFeeTiers(signer, th, bps);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Fee tiers updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -490,7 +501,7 @@ export default function AdminDash() {
       if (!isAddr(token)) throw new Error("Select a token");
       if (toLower(token) !== toLower(wone) && toLower(token) !== toLower(usdc)) throw new Error("Token not allowed");
       const { signer } = await requireOwnerAndSigner();
-      const tx = await vaultService.withdrawFunds(signer, token);
+      const tx = await adminService.withdrawFunds(signer, token);
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Withdraw submitted. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       await loadBasics();
@@ -499,6 +510,28 @@ export default function AdminDash() {
       setNotice({ type: "error", msg: err?.message || "Failed to withdraw funds" });
     } finally { setBusy((b) => ({ ...b, wd: false })); }
   }, [tokenSel, wone, usdc, requireOwnerAndSigner, loadBasics]);
+
+  const onToggleRoundDelay = useCallback(async () => {
+    setBusy((b) => ({ ...b, delay: true })); 
+    setNotice(null);
+    try {
+      const { signer } = await requireOwnerAndSigner();
+      const tx = await adminService.setRoundDelayEnabled(signer, !roundDelayEnabled);
+      const rc = await waitReceipt(tx, signer);
+      setNotice({
+        type: "success",
+        msg: `Round delay ${!roundDelayEnabled ? "enabled" : "disabled"}. Tx: ${txHashOf(rc) || txHashOf(tx)}`
+      });
+      setRoundDelayEnabled((v) => !v);
+      // opcional: await loadBasics();
+    } catch (err) {
+      console.error("[AdminDash] setRoundDelayEnabled error:", err);
+      setNotice({ type: "error", msg: err?.message || "Failed to update round delay" });
+    } finally {
+      setBusy((b) => ({ ...b, delay: false }));
+    }
+  }, [roundDelayEnabled, requireOwnerAndSigner]);
+
 
   // --- UI helpers ---
   const roundStartText = useMemo(() => {
@@ -584,6 +617,23 @@ export default function AdminDash() {
               <div className={styles.row}>
                 <button type="button" className={styles.button} onClick={onToggleLocked} disabled={!canWrite || busy.lock}>{busy.lock ? "Updating…" : locked ? "Unlock" : "Lock"}</button>
               </div>
+              <div className={styles.contractFundsSep}/>
+
+                <div className={styles.row}>
+                  <label className={styles.smallMuted} style={{ marginRight: 12 }}>Delay enabled?</label>
+                  <input type="checkbox" checked={roundDelayEnabled} onChange={() => {}} disabled />
+                </div>
+                <div className={styles.row}>
+                  <button
+                    type="button"
+                    className={styles.button}
+                    onClick={onToggleRoundDelay}
+                    disabled={!canWrite || busy.delay}
+                  >
+                    {busy.delay ? "Updating…" : (roundDelayEnabled ? "Disable Delay" : "Enable Delay")}
+                  </button>
+                </div>
+
             </Section>
 
             {/* Start New Round */}

@@ -53,6 +53,10 @@ export async function usdc(p){ return await (await getReadContract(p)).usdc(); }
 export async function oracle(p){ return await (await getReadContract(p)).oracle(); }
 
 export async function ROUND_DELAY(p){ return b(await (await getReadContract(p)).ROUND_DELAY()); }
+export async function roundDelayEnabled(p){ return bool(await (await getReadContract(p)).roundDelayEnabled()); }
+export async function roundBps(p){ return Number(await (await getReadContract(p)).roundBps()); }
+export async function roundFeeBasisUsd(p){ return b(await (await getReadContract(p)).roundFeeBasisUsd()); }
+export async function roundFeeLocked(p){ return bool(await (await getReadContract(p)).roundFeeLocked()); }
 export async function WALLET_RESET_INTERVAL(p){ return b(await (await getReadContract(p)).WALLET_RESET_INTERVAL()); }
 export async function currentRound(p){ return b(await (await getReadContract(p)).currentRound()); }
 export async function roundStart(p){ return b(await (await getReadContract(p)).roundStart()); }
@@ -97,8 +101,18 @@ export async function lastRedeemTimestamp(p, user){
 
 export async function getRoundInfo(p){
   const r = await (await getReadContract(p)).getRoundInfo();
-  return { roundId: b(r[0]), startTime: b(r[1]), isActive: bool(r[2]), paused: bool(r[3]), limitUsd: b(r[4]) };
+  return {
+    roundId: b(r[0]),
+    startTime: b(r[1]),
+    isActive: bool(r[2]),
+    paused: bool(r[3]),
+    limitUsd: b(r[4]),
+    delayEnabled: bool(r[5]),
+    roundFeeBps: Number(r[6]),
+    roundFeeBasis: b(r[7]),
+  };
 }
+
 
 export async function redeemedInRound(p, roundId, wallet){
   return b(await (await getReadContract(p)).redeemedInRound(roundId, wallet));
@@ -161,13 +175,18 @@ export function getEventTopics() {
     RedeemProcessed: iface.getEventTopic("RedeemProcessed"),
     SupportedTokenUpdated: iface.getEventTopic("SupportedTokenUpdated"),
     VaultPaused: iface.getEventTopic("VaultPaused"),
+    RoundFeeLocked: iface.getEventTopic("RoundFeeLocked"),
+    RoundDelayToggled: iface.getEventTopic("RoundDelayToggled"),
   };
 }
 
 const oracleCache = new WeakMap();
 const ORACLE_TTL_MS = Number(import.meta.env.VITE_ORACLE_TTL_MS ?? 10000);
 
-
+export async function getUserLimitObject(p, wallet){
+  const v = await getUserLimit(p, wallet);
+  return { remainingUSD: v };
+}
 
 export async function oracleLatest(p) {
   const o = await oracle(p);
@@ -290,16 +309,18 @@ export async function getVaultStatus(p) {
     v.getVaultBalances(),
     v.getFeeTiers(),
   ]);
-
   return {
     roundId: b(ri[0]),
     startTime: b(ri[1]),
     isActive: bool(ri[2]),
     paused: bool(ri[3]),
     limitUsd: b(ri[4]),
+    delayEnabled: bool(ri[5]),
+    roundFeeBps: Number(ri[6]),
+    roundFeeBasis: b(ri[7]),
     locked: bool(locked),
-    balances: { wone: BigInt(balances[0]), usdc: BigInt(balances[1]) },
-    feeThresholds: feeTiers[0].map(b),
-    feeBps: feeTiers[1].map(n),
+    balances: { wone: b(balances[0]), usdc: b(balances[1]) },
+    feeThresholds: (feeTiers[0] || []).map(b),
+    feeBps: (feeTiers[1] || []).map(n),
   };
 }
