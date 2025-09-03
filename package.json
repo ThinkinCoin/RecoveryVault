@@ -16,7 +16,8 @@
     "set:merkle": "npx hardhat run scripts/setMerkleProof.js --network harmony",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview", 
+    "snap:wl": "node scripts/snap-strategy-wl.js -i public/data/prehack_list.txt -o public/data/prehack_list.json -s ONE -N 1666600000 -b latest -w 1 -c as-is"
   },
   "keywords": [
     "Recovery Harmony"
