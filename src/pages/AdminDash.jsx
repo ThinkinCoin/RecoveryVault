@@ -32,6 +32,21 @@ async function waitReceipt(tx, signerOrProvider){
   } catch(e){ console.warn("[waitReceipt] fallback", e); return { hash: txHashOf(tx) }; }
 }
 
+ // Format on-chain USD (×1e4) into human string like "100.1234"
+function formatUsd4(v, { minFrac = 2, maxFrac = 4 } = {}) {
+  try {
+    const n = BigInt(v ?? 0n);
+    const sign = n < 0n ? "-" : "";
+    const abs = n < 0n ? -n : n;
+    const i = abs / 10000n;
+    let f = (abs % 10000n).toString().padStart(4, "0");
+    if (maxFrac < 4) f = f.slice(0, maxFrac);
+    while (f.length > minFrac && f.endsWith("0")) f = f.slice(0, -1);
+    return f.length ? `${sign}${i}.${f}` : `${sign}${i}`;
+  } catch { return String(v ?? "0"); }
+}
+
+
 function Badge({ ok, textTrue = "Active", textFalse = "Inactive" }) {
   return (
     <span
@@ -307,9 +322,9 @@ export default function AdminDash() {
     setBusy((b) => ({ ...b, daily: true })); setNotice(null);
     try {
       const { signer } = await requireOwnerAndSigner();
-      const parsed = Math.floor(Number(String(dailyLimit).replace(/,/g, ".")));
-      if (!Number.isFinite(parsed) || parsed < 0) throw new Error("Invalid amount");
-      const tx = await adminService.setDailyLimit(signer, parsed);
+      const raw = String(dailyLimit ?? "").trim().replace(/,/g, ".");
+      if (!/^\d+(\.\d{0,4})?$/.test(raw)) throw new Error("Enter a USD amount with up to 4 decimals");
+      const tx = await adminService.setDailyLimit(signer, raw); // parsed to USD×1e4 by the service
       const rc = await waitReceipt(tx, signer);
       setNotice({ type: "success", msg: `Daily limit updated. Tx: ${txHashOf(rc) || txHashOf(tx)}` });
       setDailyLimit("");
@@ -579,8 +594,8 @@ export default function AdminDash() {
                 <div className={styles.row}><span className={styles.contractFundsLabel}>Start</span><span className={styles.contractFundsSubValue}>{roundStartText}</span></div>
                 <div className={styles.row}><span className={styles.contractFundsLabel}>Active</span><Badge ok={roundInfo.isActive} textTrue="Active" textFalse="Inactive" /></div>
                 <div className={styles.row}><span className={styles.contractFundsLabel}>Locked</span><Badge ok={roundInfo.paused} textTrue="Locked" textFalse="Unlocked" /></div>
-                <div className={styles.row}><span className={styles.contractFundsLabel}>Daily Limit (USD)</span><span className={styles.contractFundsValue}>{String(roundInfo.limitUsd)}</span></div>
-              </div>
+                <div className={styles.row}><span className={styles.contractFundsLabel}>Daily Limit (USD)</span><span className={styles.contractFundsValue}>{formatUsd4(roundInfo.limitUsd)}</span></div>
+                </div>
             </div>
 
             <div className={styles.card}>
@@ -600,8 +615,8 @@ export default function AdminDash() {
             {/* Daily Limit */}
             <Section title="Daily Limit (USD)" right={null}>
               <div className={styles.field}>
-                <label className={styles.smallMuted}>New Limit (whole USD)</label>
-                <input className={styles.input} type="number" min={0} inputMode="numeric" placeholder="e.g. 100" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} disabled={busy.daily} />
+                <label className={styles.smallMuted}>New Limit (USD, up to 4 decimals)</label>
+                <input className={styles.input} type="text" inputMode="decimal" placeholder="e.g. 100.1234" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} disabled={busy.daily} />
               </div>
               <div className={styles.row}>
                 <button type="button" className={cls(styles.button, styles.buttonAccent)} onClick={onSetDailyLimit} disabled={!canWrite || busy.daily}>{busy.daily ? "Updating…" : "Set Daily Limit"}</button>

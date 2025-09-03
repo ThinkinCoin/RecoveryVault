@@ -48,6 +48,7 @@ function prettyRevert(e, fallback) {
     e?.message ||
     fallback ||
     "Transaction failed";
+  if (/Exceeds daily limit/i.test(msg)) return "Daily limit exceeded (USD×1e4). Try a smaller amount.";
   if (/Invalid oracle/i.test(msg)) return "Oracle inválido (latestPrice <= 0 ou ABI incompatível).";
   if (/No funds/i.test(msg)) return "Cofre sem liquidez (wONE/USDC).";
   if (/Round ID must increase/i.test(msg)) return "Round ID deve ser maior que o atual.";

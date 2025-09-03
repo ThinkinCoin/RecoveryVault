@@ -755,12 +755,9 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
     if (!wlLoading && !wlOk) return true;
     if (!roundActive) return true;
     if (!receivePreview || receivePreview.raw === 0n) return true;
-    if (receivePreview?.userLimitUsdAfter != null) {
-      const after4 = BigInt(receivePreview.userLimitUsdAfter);
-      if (after4 <= 0n) return true;
-    } else {
+    if (receivePreview?.userLimitUsdAfter == null) {
       if (amountUSD4 === 0n) return true;
-      if (limitUSD4 !== 0n && amountUSD4 >= limitUSD4) return true;
+      if (limitUSD4 !== 0n && amountUSD4 > limitUSD4) return true;
     }
     return false;
   }, [busy, isConnected, address, ctxSigner, tokenIn, redeemIn, debouncedAmount, wlLoading, wlOk, amountUSD4, limitUSD4, receivePreview, isValidHuman, roundActive]);

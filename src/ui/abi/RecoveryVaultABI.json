@@ -37,7 +37,7 @@
         },
         {
           "internalType": "uint256",
-          "name": "_dailyLimitUsd",
+          "name": "_dailyLimitUsd18",
           "type": "uint256"
         },
         {
@@ -67,7 +67,7 @@
         {
           "indexed": false,
           "internalType": "address",
-          "name": "refundToken",
+          "name": "outputToken",
           "type": "address"
         },
         {
@@ -184,6 +184,49 @@
       "anonymous": false,
       "inputs": [
         {
+          "indexed": true,
+          "internalType": "address",
+          "name": "user",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "usdIn18",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "usdNet18",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "remainingBefore18",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "remainingAfter18",
+          "type": "uint256"
+        }
+      ],
+      "name": "RedeemValuationUSD18",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
           "indexed": false,
           "internalType": "bool",
           "name": "enabled",
@@ -235,6 +278,25 @@
         }
       ],
       "name": "SupportedTokenUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "token",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "TokenSinkFallback",
       "type": "event"
     },
     {
@@ -521,7 +583,7 @@
       "outputs": [
         {
           "internalType": "uint256",
-          "name": "remainingUSD",
+          "name": "remainingUSD18",
           "type": "uint256"
         }
       ],
@@ -890,7 +952,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "usdAmount",
+          "name": "usdAmount18",
           "type": "uint256"
         }
       ],

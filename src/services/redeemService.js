@@ -163,6 +163,8 @@ function decodeRevert(e) {
 
   // 3) Fallback: try to read reason from thrown message
   const raw = pickMsg(e);
+  if (/Exceeds daily limit/i.test(String(raw))) return "Daily limit exceeded (USD×1e4). Reduce the amount.";
+  if (/Daily limit locked/i.test(String(raw))) return "Daily limit reached. Please wait for your 24h window to reset.";
   const m = /execution reverted(?::|: )?\s*(.*)$/i.exec(String(raw || ""));
   if (m && m[1]) return m[1].trim();
   return "";
@@ -171,6 +173,8 @@ function decodeRevert(e) {
 export function rpcFriendly(e) {
   // Prefer decoded revert reasons
   const decoded = decodeRevert(e);
+  if (/Exceeds daily limit/i.test(String(raw))) return "Daily limit exceeded (USD×1e4). Reduce the amount.";
+  if (/Daily limit locked/i.test(String(raw))) return "Daily limit reached. Please wait for your 24h window to reset.";
   if (decoded) return decoded;
 
   const code = e?.code;
@@ -387,6 +391,8 @@ export async function approveIfNeeded(signer, token, owner, spender, amount) {
 }
 
 export async function approveForVaultIfNeeded(signer, token, owner, amount) {
+  // Native ONE path: no ERC20 allowance needed
+  if (!token || /^0x0{40}$/i.test(String(token))) return null;
   const spender = await getVaultSpender(signer);
   if (!spender) throw new Error("Vault contract not configured");
   return await approveIfNeeded(signer, token, owner, spender, amount);
@@ -397,6 +403,10 @@ export async function redeem(signer, tokenIn, amountIn, redeemIn, proof = [], ov
   const args = [tokenIn, amountIn, redeemIn, Array.isArray(proof) ? proof : []];
   const from = await signer.getAddress?.();
   const baseOverrides = { from, ...(overrides || {}) };
+  // Native ONE path (contract expects msg.value == amountIn)
+  if (!tokenIn || /^0x0{40}$/i.test(String(tokenIn))) {
+    baseOverrides.value = BigInt(amountIn);
+  }
 
   // 0) Extra preflight via view: quoteRedeem (best-effort; some RPCs return 0x and break decoding)
   try {
