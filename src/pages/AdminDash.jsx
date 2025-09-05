@@ -47,6 +47,23 @@ function formatUsd4(v, { minFrac = 2, maxFrac = 4 } = {}) {
 }
 
 
+
+// Format USD18 (USD * 1e18 on-chain) into human string like "100.00"
+function formatUsd18(v, { minFrac = 2, maxFrac = 2 } = {}) {
+  try {
+    const as = ethers.formatUnits(v ?? 0n, 18);
+    const num = Number(as);
+    return num.toLocaleString(undefined, { minimumFractionDigits: minFrac, maximumFractionDigits: maxFrac });
+  } catch {
+    try {
+      const num = Number(v ?? 0);
+      return num.toLocaleString(undefined, { minimumFractionDigits: minFrac, maximumFractionDigits: maxFrac });
+    } catch {
+      return String(v ?? "0");
+    }
+  }
+}
+
 function Badge({ ok, textTrue = "Active", textFalse = "Inactive" }) {
   return (
     <span
@@ -594,7 +611,7 @@ export default function AdminDash() {
                 <div className={styles.row}><span className={styles.contractFundsLabel}>Start</span><span className={styles.contractFundsSubValue}>{roundStartText}</span></div>
                 <div className={styles.row}><span className={styles.contractFundsLabel}>Active</span><Badge ok={roundInfo.isActive} textTrue="Active" textFalse="Inactive" /></div>
                 <div className={styles.row}><span className={styles.contractFundsLabel}>Locked</span><Badge ok={roundInfo.paused} textTrue="Locked" textFalse="Unlocked" /></div>
-                <div className={styles.row}><span className={styles.contractFundsLabel}>Daily Limit (USD)</span><span className={styles.contractFundsValue}>{formatUsd4(roundInfo.limitUsd)}</span></div>
+                <div className={styles.row}><span className={styles.contractFundsLabel}>Daily Limit (USD)</span><span className={styles.contractFundsValue}>{formatUsd18(roundInfo.limitUsd)}</span></div>
                 </div>
             </div>
 
@@ -799,7 +816,7 @@ export default function AdminDash() {
 
         </div>
       </main>
-      <Footer className={styles.footer} />
+      <Footer />
     </div>
   );
-}
+} 

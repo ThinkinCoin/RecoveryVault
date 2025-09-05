@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { ethers } from "ethers";
-import { getDefaultProvider, getSupportedTokens, supportedToken } from "@/services/vaultService";
+import { getDefaultProvider, getSupportedTokens, supportedToken } from "@/services/vaultCore";
 import tokenCatalog from "@/lists/harmony-tokenlist.json"; // tokenlist with logo, name, symbol, decimals, address/contract
 
 /**

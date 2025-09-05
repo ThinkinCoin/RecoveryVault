@@ -1,5 +1,5 @@
 // src/services/vaultCore.js
-import { Contract, JsonRpcProvider, Interface, getAddress } from "ethers";
+import { Contract, JsonRpcProvider, Interface, getAddress, ethers } from "ethers";
 import VaultArtifact from "@/ui/abi/RecoveryVaultABI.json";
 
 const VAULT_ABI = VaultArtifact.abi ?? VaultArtifact;
@@ -11,35 +11,37 @@ const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)"
 ];
 
-// ===== USD4 helpers =====
-export const USD_SCALE_BI = 10000n; // 1e4
-export function parseUsdToUsd4BigInt(input) {
-  // "100.1234" -> 1001234n
-  const s = String(input ?? "").trim().replace(",", ".");
-  if (!s) return 0n;
-  const [intPart, fracRaw = ""] = s.split(".");
-  const frac = (fracRaw + "0000").slice(0, 4); // pad para 4 casas
-  const bi = BigInt(intPart || "0") * USD_SCALE_BI + BigInt(frac || "0");
-  return bi;
+// ===== USD helpers (centralizados) =====
+export const USD_SCALE_BI = 10_000n;     // 1e4 (USD4)
+export const USD_1e18_BI  = 10n ** 18n;  // 1e18 (USD18)
+
+// USD18 -> USD4
+export function toUsd4(usd18) {
+  return (BigInt(usd18) * USD_SCALE_BI) / USD_1e18_BI;
 }
 
-export async function setDailyLimit(signer, usd4BigInt){
+// USD4 -> USD18
+export function toUsd18(usd4) {
+  return (BigInt(usd4) * USD_1e18_BI) / USD_SCALE_BI;
+}
+// =======================================
+
+export async function setDailyLimitUsd18(signer, usd18BigInt){
   const v = getWriteContract(signer);
-  return await v.setDailyLimit(usd4BigInt);
+  return await v.setDailyLimit(BigInt(usd18BigInt));
 }
 
 function b(v){ return BigInt(v); }
 function n(v){ return Number(v); }
 function bool(v){ return Boolean(v); }
 
+let _read;
 export function getDefaultProvider() {
-  try {
-    const url = import.meta.env.VITE_RPC_URL;
-    if (!url) return undefined;
-    return new JsonRpcProvider(url);
-  } catch {
-    return undefined;
-  }
+  if (_read) return _read;
+  const url = import.meta.env.VITE_RPC_URL;          // ex.: https://api.harmony.one
+  const chainId = Number(import.meta.env.VITE_CHAIN_ID || 1666600000);
+  _read = new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true });
+  return _read;
 }
 
 export function getVaultAddress() {
@@ -137,24 +139,27 @@ export async function redeemedInRound(p, roundId, wallet){
 
 export async function quoteRedeem(p, user, tokenIn, amountIn, redeemIn, proof = []) {
   const v = await getReadContract(p);
-  const r = await v.quoteRedeem(
-    user,
-    tokenIn,
-    amountIn,
-    redeemIn,
-    Array.isArray(proof) ? proof : []
-  );
+  const r = await v.quoteRedeem(user, tokenIn, amountIn, redeemIn, Array.isArray(proof) ? proof : []);
+
+  const b = (x) => BigInt(x);
+  const n = (x) => Number(x);
+  const to4 = (x18) => (BigInt(x18) * USD_SCALE_BI) / (10n ** 18n);
+
+  const userLimitBefore18 = b(r[4]);
+  const userLimitAfter18  = b(r[5]);
+  const usdIn18           = b(r[6]);
+
   return {
-    whitelisted:        bool(r[0]),
-    roundIsActive:      bool(r[1]),
+    whitelisted:        Boolean(r[0]),
+    roundIsActive:      Boolean(r[1]),
     feeAmountInTokenIn: b(r[2]),
     burnAmountInTokenIn:b(r[3]),
-    userLimitUsdBefore: b(r[4]),   
-    userLimitUsdAfter:  b(r[5]),   
-    usdValueIn:         b(r[6]),   
-    limitBefore4:       b(r[4]),
-    limitAfter4:        b(r[5]),
-    usdValueIn4:        b(r[6]),
+    userLimitUsdBefore: to4(userLimitBefore18),
+    userLimitUsdAfter:  to4(userLimitAfter18),
+    usdValueIn:         to4(usdIn18),
+    userLimitUsdBefore18: userLimitBefore18,
+    userLimitUsdAfter18:  userLimitAfter18,
+    usdValueIn18:         usdIn18,
     tokenInDecimals:    n(r[7]),
     redeemInDecimals:   n(r[8]),
     oraclePrice:        b(r[9]),
@@ -162,6 +167,7 @@ export async function quoteRedeem(p, user, tokenIn, amountIn, redeemIn, proof = 
     amountOutRedeemToken: b(r[11]),
   };
 }
+
 
 export async function getTokenDecimals(provider, token) {
   const erc = new Contract(token, ERC20_ABI, provider);
@@ -203,6 +209,9 @@ export function getEventTopics() {
     VaultPaused: iface.getEventTopic("VaultPaused"),
     RoundFeeLocked: iface.getEventTopic("RoundFeeLocked"),
     RoundDelayToggled: iface.getEventTopic("RoundDelayToggled"),
+    RedeemValuationUSD18: iface.getEventTopic("RedeemValuationUSD18"),
+    TokenSinkFallback:    iface.getEventTopic("TokenSinkFallback"),
+
   };
 }
 
@@ -210,9 +219,11 @@ const oracleCache = new WeakMap();
 const ORACLE_TTL_MS = Number(import.meta.env.VITE_ORACLE_TTL_MS ?? 10000);
 
 export async function getUserLimitObject(p, wallet){
-  const v = await getUserLimit(p, wallet);
-  return { remainingUSD: v };
+  const v18 = await getUserLimit(p, wallet);
+  const v4  = toUsd4(v18);
+  return { remainingUSD: v4, remainingUSD18: v18 };
 }
+
 
 export async function oracleLatest(p) {
   const o = await oracle(p);

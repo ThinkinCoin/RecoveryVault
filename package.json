@@ -17,7 +17,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview", 
-    "snap:wl": "node scripts/snap-strategy-wl.js -i public/data/prehack_list.txt -o public/data/prehack_list.json -s ONE -N 1666600000 -b latest -w 1 -c as-is"
+    "snap:wl": "node scripts/snap-strategy-wl.js -i public/data/prehack_list.txt -c public/snap-cfg.json -wout public/snap-str.json -N 1666600000 -b latest -W 1 -C as-is -u https://raw.githubusercontent.com/mzfshark/RecoveryVault/refs/heads/development/public/snap-str.json"
   },
   "keywords": [
     "Recovery Harmony"

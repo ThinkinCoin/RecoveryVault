@@ -10,7 +10,11 @@ import {
   getTokenDecimals as coreGetTokenDecimals,
   oracleLatest as coreOracleLatest,
   getFeeTiers as coreGetFeeTiers,
+  USD_SCALE_BI,
+  toUsd4,
+  toUsd18, // (se precisar no futuro)
 } from "@/services/vaultCore";
+
 
 const ERC20_ABI = [
   "function decimals() view returns (uint8)",
@@ -41,12 +45,6 @@ const VAULT_ERROR_IFACE = new Interface([
   "error MismatchONEAmount()",
   "error DoNotSendONEWithERC20()",
 ]);
-
-// === USD4 helpers ===
-const USD_SCALE_BI = 10_000n; // 1e4
-function usd18ToUsd4(usd18) {
-  return (BigInt(usd18) * USD_SCALE_BI) / (10n ** 18n);
-}
 
 const TTL = { ADDR: 60_000, DEC: 300_000, ORACLE: 30_000, FEES: 300_000 };
 const addrCache = new Map();
@@ -171,14 +169,15 @@ function decodeRevert(e) {
 }
 
 export function rpcFriendly(e) {
-  // Prefer decoded revert reasons
   const decoded = decodeRevert(e);
+  const raw = pickMsg(e);
+
   if (/Exceeds daily limit/i.test(String(raw))) return "Daily limit exceeded (USD×1e4). Reduce the amount.";
   if (/Daily limit locked/i.test(String(raw))) return "Daily limit reached. Please wait for your 24h window to reset.";
   if (decoded) return decoded;
 
   const code = e?.code;
-  const msg = pickMsg(e).toLowerCase();
+  const msg = String(raw).toLowerCase();
   if (code === "ACTION_REJECTED" || code === 4001 || /user rejected|denied|rejected request|eip-1193/.test(msg)) return "Transaction rejected by user";
   if (code === "CALL_EXCEPTION" || /execution reverted|revert/.test(msg)) return "Transaction would revert";
   if (code === "UNPREDICTABLE_GAS_LIMIT" || /cannot estimate gas|gas required exceeds allowance/.test(msg)) return "Gas estimation failed (contract may revert)";
@@ -188,8 +187,9 @@ export function rpcFriendly(e) {
   if (/providerdisconnected|chaindisconnected|disconnected/.test(msg)) return "Wallet or network disconnected";
   if (/insufficient funds/.test(msg)) return "Insufficient funds for gas or value";
   if (/rate limit|too many requests|status code 429/.test(msg)) return "RPC rate limited. Please retry shortly";
-  return pickMsg(e);
+  return raw;
 }
+
 
 async function getWONE(provider) {
   const ck = await chainKey(provider);
@@ -272,20 +272,20 @@ export async function computeUsd18(provider, tokenIn, amountRaw) {
     if (price <= 0n) return { usd18: 0n, oracle: null };
     const one18 = (amt * (10n ** 18n)) / (10n ** BigInt(dec));
     const usd18 = (one18 * price) / (10n ** BigInt(odec));
-    return { usd18, usd4: usd18ToUsd4(usd18), oracle };
+    return { usd18, usd4: toUsd4(usd18), oracle };
   }
 
   if (usdcAddr && String(tokenIn).toLowerCase() === String(usdcAddr).toLowerCase()) {
     const usdcDec = await getTokenDecimals(provider, usdcAddr).catch(() => 6);
     const usd18 = (amt * (10n ** 18n)) / (10n ** BigInt(usdcDec));
-    return { usd18, usd4: usd18ToUsd4(usd18), oracle: null };
+    return { usd18, usd4: toUsd4(usd18), oracle: null };
   }
 
   const px18 = await fixedUsdPrice(provider, tokenIn).catch(() => 0n);
   if (px18 <= 0n) return { usd18: 0n, oracle: null };
   const dec = await getTokenDecimals(provider, tokenIn).catch(() => 18);
   const usd18 = (amt * BigInt(px18)) / (10n ** BigInt(dec));
-  return { usd18, usd4: usd18ToUsd4(usd18), oracle: null };
+  return { usd18, usd4: toUsd4(usd18), oracle: null };
 }
 
 export async function usd18ToOut(provider, usd18, outToken, opts = {}) {

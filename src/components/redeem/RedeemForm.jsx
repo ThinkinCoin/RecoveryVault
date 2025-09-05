@@ -25,7 +25,7 @@ const ROUND_TTL_MS = 15000;
 const FEES_TTL_MS = 60000;
 const FIXED_TTL_MS = 60000;
 const USERLIMIT_TTL_MS = 20000;
-const CHAIN_QUOTE_TIMEOUT_MS = Number(import.meta.env.VITE_CHAIN_QUOTE_TIMEOUT_MS ?? 900);
+const CHAIN_QUOTE_TIMEOUT_MS = Number(import.meta.env.VITE_CHAIN_QUOTE_TIMEOUT_MS ?? 2500);
 
 const TOKEN_META_CACHE = new Map();
 async function getTokenMetaCached(provider, addr){
@@ -215,23 +215,9 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
    }
    const out = await core.oracleLatest(readProvider).catch(() => ({ price: 0n, decimals: 18 }));
    // If core returns inverted (ONE per USD), heuristically invert (>1 means likely inverted)
-   try {
-     const { price = 0n, decimals = 18 } = out || {};
-     if (price > 0n) {
-       // normalize to 18-dec USD/ONE
-       const p18 = decimals === 18 ? price : (price * 10n ** 18n) / 10n ** BigInt(decimals);
-       // If p18 > 1e18 (i.e., > $1), pode estar certo; se p18 ~ 97 (1e18*97): invertido.
-       // Para ONE hoje (~$0.01), preço correto deve ser << 1e18. Se for >>, invertamos.
-       const isInverted = p18 > 10n ** 18n; 
-       const norm = isInverted ? ( (10n ** 36n) / p18 ) : p18; // invert
-       const normalized = { price: norm, decimals: 18 };
-       oracleCacheRef.current = { ts: now, value: normalized };
-       return normalized;
-     }
-   } catch {}
    oracleCacheRef.current = { ts: now, value: out };
    return out;
- }, [readProvider, oneUsdFloat]);
+  }, [readProvider, oneUsdFloat]);
 
   const getCachedRoundInfo = useCallback(async () => {
     const now = Date.now();
@@ -369,7 +355,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
         if (alive) setLoadingBalances(false);
       }
     })();
-    return () => { alive = true; };
+    return () => { alive = false; };
   }, [readProvider, address, supportedTokens]);
 
   useEffect(() => {
@@ -445,72 +431,68 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
 
         const computeLocal = async () => {
           try {
+            // 1) pegue o snapshot UMA vez por run
+            const oracleSnap = await getCachedOracle(); // { price, decimals }
+            const priceOk = oracleSnap && BigInt(oracleSnap.price ?? 0n) > 0n;
+            const price18 =
+              priceOk
+                ? (BigInt(oracleSnap.price) * 10n ** 18n) / 10n ** BigInt(Number(oracleSnap.decimals ?? 18))
+                : 0n;
+
             const tokenIsUSDC = usdc && tokenIn && String(usdc).toLowerCase() === String(tokenIn).toLowerCase();
             const tokenIsONE  = wone && tokenIn && String(wone).toLowerCase() === String(tokenIn).toLowerCase();
+
+            // 2) USD18 do input
             let usd18 = 0n;
             if (tokenIsUSDC) {
-              usd18 = amountIn * 10n ** 18n / 10n ** BigInt(usdcDecimals || 6);
+              usd18 = (amountIn * 10n ** 18n) / 10n ** BigInt(usdcDecimals || 6);
             } else if (tokenIsONE) {
-              const { price = 0n, decimals = 18 } = await getCachedOracle();
-              if (price > 0n) {
-                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals);
-                usd18 = amountIn * price18 / 10n ** BigInt(selectedDecimals);
+              if (price18 > 0n) {
+                usd18 = (amountIn * price18) / 10n ** BigInt(selectedDecimals);
               }
             } else {
               const fp = await getCachedFixedPrice(tokenIn).catch(() => 0n);
-              if (fp > 0n) usd18 = amountIn * fp / 10n ** BigInt(selectedDecimals);
+              if (fp > 0n) usd18 = (amountIn * fp) / 10n ** BigInt(selectedDecimals);
             }
 
+            // 3) fee tiers (mesma lógica, sem mexer)
             const tiers = await getCachedFeeTiers().catch(() => ({ thresholds: [], bps: [] }));
-            const pickBps = (u18) => {
+            const usd4 = (usd18 * 10_000n) / 10n**18n;
+            const pickBps = (usdIntVal) => {
               const th = tiers.thresholds || [];
-              let bpsArr = (tiers.bps || []).map((x) => Number(x || 0));
-              // auto-detect: if every value <= 100, assume PERCENT and convert to BPS
-              if (bpsArr.length && bpsArr.every((v) => v <= 100)) {
-                bpsArr = bpsArr.map((v) => v * 100); // 1% -> 100 bps
-              }
+              const bpsArr = (tiers.bps || []).map((x) => Number(x || 0));
               for (let i = 0; i < th.length; i++) {
-                const t = th[i] ?? 0n;
-                if (u18 <= t) return Number(bpsArr[i] ?? 0);
+                const t = BigInt(th[i] ?? 0n);
+                if (usdIntVal <= t) return Number(bpsArr[i] ?? 0);
               }
               return Number(bpsArr[(bpsArr.length || 1) - 1] || 0);
             };
-            const bps = pickBps(usd18);
-            const fee = amountIn * BigInt(bps) / 10000n;
+            const usdInt = usd18 / 10n**18n;
+            const bps = pickBps(usdInt);
+            const fee = (amountIn * BigInt(bps)) / 10000n;
             const net = amountIn - fee;
-            const usdNet18 = amountIn > 0n ? usd18 * net / amountIn : 0n;
+            const usdNet18 = amountIn > 0n ? (usd18 * net) / amountIn : 0n;
 
+            // 4) output amount
             const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
             const outDec = outIsUSDC ? (usdcDecimals || 6) : 18;
             const outSym = outIsUSDC ? "USDC" : "wONE";
 
             let amountOut = 0n;
             if (outIsUSDC) {
-              amountOut = usdNet18 * 10n ** BigInt(outDec) / 10n ** 18n;
+              amountOut = (usdNet18 * 10n ** BigInt(outDec)) / 10n ** 18n;
             } else {
-              const { price = 0n, decimals = 18 } = await getCachedOracle();
-              if (price > 0n) {
-                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals);
-                amountOut = usdNet18 * 10n ** 18n / price18;
+              if (price18 > 0n) {
+                amountOut = (usdNet18 * 10n ** 18n) / price18;
               }
             }
 
-            // Compute usdOut18 from the *output* token:
-            // - if USDC: scale to 18 decimals
-            // - if wONE: multiply by ONE/USD (18-dec), then normalize to 18
-            let usdOut18 = 0n;
-            if (outIsUSDC) {
-              usdOut18 = amountOut * 10n ** 18n / 10n ** BigInt(outDec);
-            } else {
-              const { price = 0n, decimals = 18 } = await getCachedOracle();
-              if (price > 0n) {
-                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals); // USD/ONE in 18-dec
-                usdOut18 = amountOut * price18 / 10n ** 18n;
-              }
-            }
+            // 5) USD (para limite) a partir do *output*
+            const usdOut18 = usdNet18;
 
             if (!cancelled && runId === runIdRef.current) {
-              const usdOut4 = (usdOut18 * 10_000n) / (10n ** 18n);
+              const usdOut4 = core.toUsd4(usdOut18);
+
               setAmountUSD4(usdOut4);
               setReceivePreview({
                 raw: amountOut,
@@ -521,12 +503,13 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
                 maxOut: amountOut,
                 roundIsActive: true,
                 whitelisted: !!(wlProof && wlProof.length),
-                userLimitUsdAfter: null, // sem after local; usaremos comparação no botão
+                userLimitUsdAfter: null, // sem after local; usamos comparação no botão
                 usdOut18
               });
             }
           } catch {}
         };
+
 
         if (first && first !== "timeout") {
           const q = first;
@@ -557,7 +540,6 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
             const onChainAfter4 = q.userLimitUsdAfter != null ? BigInt(q.userLimitUsdAfter) : null;
             const after4 = onChainAfter4 != null ? onChainAfter4
                         : (BigInt(remaining4 ?? 0n) > usdOut4 ? (BigInt(remaining4 ?? 0n) - usdOut4) : 0n);
-
 
             setAmountUSD4(usdOut4);
             setLimitUSD4(BigInt(q.userLimitUsdBefore ?? remaining4));
@@ -648,7 +630,7 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
       }
       let byLimit = 0n;
       if (price18 > 0n) {
-        const remain18 = remain4 * 100_000_000_000_000n; // 1e14 para converter USD4 -> USD18
+        const remain18 = core.toUsd18(remain4);
         byLimit = (remain18 * 10n ** dec) / price18;
       }
       const maxTok = byLimit > 0n ? (bal < byLimit ? bal : byLimit) : bal;
@@ -755,7 +737,9 @@ export default function RedeemForm({ address: addressProp, debounceMs }) {
     if (!wlLoading && !wlOk) return true;
     if (!roundActive) return true;
     if (!receivePreview || receivePreview.raw === 0n) return true;
-    if (receivePreview?.userLimitUsdAfter == null) {
+    if (receivePreview?.userLimitUsdAfter != null) {
+      if (BigInt(receivePreview.userLimitUsdAfter) <= 0n) return true;
+    } else {
       if (amountUSD4 === 0n) return true;
       if (limitUSD4 !== 0n && amountUSD4 > limitUSD4) return true;
     }

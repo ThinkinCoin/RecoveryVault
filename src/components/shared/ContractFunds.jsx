@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { useOnePrice } from "@/hooks/useOnePrice";
-import { getVaultStatus, getFeeTiers } from "@/services/vaultService";
+import { getVaultStatus, getFeeTiers, getDefaultProvider } from "@/services/vaultCore";
 import { ethers } from "ethers";
 
 // ---------- Format helpers ----------
@@ -138,7 +138,9 @@ export default function ContractFunds() {
       console.log("[ContractFunds] compute via vaultService");
 
       // Read-only provider for contract reads
-      const provider = new ethers.BrowserProvider(window.ethereum);
+      const provider = useMemo(() => {
+        try { return getDefaultProvider?.() || null; } catch { return null; }
+      }, []);
 
       // 1) Get current balances and base status
       const status = await getVaultStatus(provider);

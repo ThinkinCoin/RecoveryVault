@@ -14,7 +14,8 @@ import * as core from "@/services/vaultCore";
  * Retorno: { price: number|null, loading: boolean, error: Error|null, lastUpdated: null, reload: () => Promise<number|null> }
  */
 export function useOnePrice() {
-  const { provider } = useContractContext() ?? {};
+  const { provider: walletProvider } = useContractContext() ?? {};
+  const readProvider = core.getDefaultProvider?.() || walletProvider;
 
   const [price, setPrice] = useState(/** @type {number|null} */(null));
   const [loading, setLoading] = useState(false);
@@ -23,11 +24,11 @@ export function useOnePrice() {
   const lastUpdated = null;
 
   const load = useCallback(async () => {
-    if (!provider) return null;
+    if (!readProvider) return null;
 
     // Sempre consulta a mesma fonte do app:
     // core.oracleLatest(provider) -> { price: bigint, decimals: number }
-    const { price: pRaw, decimals } = await core.oracleLatest(provider);
+    const { price: pRaw, decimals } = await core.oracleLatest(readProvider);
     if (!pRaw || pRaw <= 0n) throw new Error("Oracle returned zero");
 
     const dec = typeof decimals === "number" ? decimals : 18;
@@ -36,10 +37,10 @@ export function useOnePrice() {
     // Atualiza estado
     setPrice(Number.isFinite(num) ? num : null);
     return Number.isFinite(num) ? num : null;
-  }, [provider]);
+  }, [readProvider]);
 
   useEffect(() => {
-    if (!provider) return;
+    if (!readProvider) return;
 
     let cancelled = false;
     (async () => {
@@ -63,7 +64,7 @@ export function useOnePrice() {
     })();
 
     return () => { cancelled = true; };
-  }, [load, provider]);
+  }, [load, readProvider]);
 
   return { price, loading, error, lastUpdated, reload: load };
 }

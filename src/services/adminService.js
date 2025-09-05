@@ -1,6 +1,6 @@
 // src/services/adminService.js
-import { Contract } from "ethers";
-import { getWriteContract, getReadContract, parseUsdToUsd4BigInt  } from "@/services/vaultCore";
+import { Contract, parseUnits } from "ethers";
+import { getWriteContract, getReadContract  } from "@/services/vaultCore";
 
 // --- ABI mínimo p/ oracles que expõem latestPrice() (int256,uint8) ---
 const IORACLE_ABI = [
@@ -49,20 +49,20 @@ function prettyRevert(e, fallback) {
     fallback ||
     "Transaction failed";
   if (/Exceeds daily limit/i.test(msg)) return "Daily limit exceeded (USD×1e4). Try a smaller amount.";
-  if (/Invalid oracle/i.test(msg)) return "Oracle inválido (latestPrice <= 0 ou ABI incompatível).";
-  if (/No funds/i.test(msg)) return "Cofre sem liquidez (wONE/USDC).";
-  if (/Round ID must increase/i.test(msg)) return "Round ID deve ser maior que o atual.";
-  if (/caller is not the owner/i.test(msg)) return "A conta conectada não é o owner do Vault.";
-  if (/missing revert data/i.test(msg)) return "Transação revertida pelo contrato (sem motivo detalhado).";
-  if (/Round not initialized/i.test(msg)) return "Round ainda não inicializado.";
-  if (/Unsupported valuation/i.test(msg)) return "Valoração de token não suportada (ajuste oracle/preço fixo).";
+  if (/Invalid oracle/i.test(msg)) return "Invalid Oracle  (latestPrice <= 0 or ABI dont match).";
+  if (/No funds/i.test(msg)) return "Vault empty (wONE/USDC).";
+  if (/Round ID must increase/i.test(msg)) return "Round ID need be higher than active.";
+  if (/caller is not the owner/i.test(msg)) return "You´re not owner, fonzie!.";
+  if (/missing revert data/i.test(msg)) return "Reverted by contract (unknown).";
+  if (/Round not initialized/i.test(msg)) return "Round not started.";
+  if (/Unsupported valuation/i.test(msg)) return "Not supported valuation Token (adjust oracle/ Fixed Price).";
 
   return msg;
 }
 
 async function preflightOracle(provider, oracleAddr) {
   if (!oracleAddr || oracleAddr === "0x0000000000000000000000000000000000000000") {
-    throw new Error("Oracle não configurado");
+    throw new Error("Oracle not configured in Vault");
   }
   const o = new Contract(oracleAddr, IORACLE_ABI, provider);
   let price, dec;
@@ -72,7 +72,7 @@ async function preflightOracle(provider, oracleAddr) {
     price = r?.price ?? (Array.isArray(r) ? r[0] : r);
     dec   = r?.decimals ?? (Array.isArray(r) ? r[1] : undefined);
   } catch {
-    throw new Error("Oracle incompatível: método latestPrice() ausente ou revertendo");
+    throw new Error("Oracle call failed (check ABI)");
   }
   const p = b(price);
   if (p <= 0n) throw new Error("Invalid oracle");
@@ -94,20 +94,25 @@ async function simulateStartNewRound(contract, signer, nextRound) {
     // Se não reverteu, está OK
   } catch (e) {
     // Decodifica razão se possível
-    throw new Error(prettyRevert(e, "Simulação falhou (revert ao chamar startNewRound)"));
+    throw new Error(prettyRevert(e, "Simulation failed"));
   }
 }
 
 // -------- Admin API --------
 export async function setDailyLimit(signer, amountLike){
-  if (!signer) throw new Error("Signer não disponível");
+  if (!signer) throw new Error("Signer indisponible (presumably not logged in)");
   const v = getWriteContract(signer);
-  // se vier bigint já em USD4, usamos; senão, convertemos string/number -> USD4
-  const usd4 =
-    typeof amountLike === "bigint"
-      ? amountLike
-      : parseUsdToUsd4BigInt(amountLike);
-  const tx = await v.setDailyLimit(usd4);
+  // O contrato espera USD * 1e18. Aceitamos bigint já em 1e18
+  // ou string/number que converteremos com 18 casas.
+  let usd18;
+  if (typeof amountLike === "bigint") {
+    usd18 = amountLike;
+  } else {
+    const s = String(amountLike ?? "").trim().replace(",", ".");
+    if (!s || !/^\d*(\.\d*)?$/.test(s)) throw new Error("Invalid amount");
+    usd18 = BigInt(parseUnits(s, 18));
+  }
+  const tx = await v.setDailyLimit(usd18);
   return await tx.wait();
 }
 
@@ -130,12 +135,12 @@ export async function setFixedUsdPrice(signer, token, usdPrice18){
 }
 
 export async function setLocked(signer, status) {
-  if (!signer) throw new Error("Signer não disponível");
+  if (!signer) throw new Error("Signer  indisponible (presumably not logged in)");
   const c = getWriteContract(signer);
   try {
     return await c.setLocked(Boolean(status));
   } catch (e) {
-    throw new Error(prettyRevert(e, "Falha ao atualizar lock"));
+    throw new Error(prettyRevert(e, "Failed to change lock status"));
   }
 }
 
@@ -164,17 +169,17 @@ export async function setSupportedToken(signer, token, allowed){
 }
 
 export async function startNewRound(signer, roundId) {
-  if (!signer) throw new Error("Signer não disponível");
+  if (!signer) throw new Error("Signer indisponible (presumably not logged in)");
 
   const c = getWriteContract(signer);
   const provider = signer.provider;
-  if (!provider) throw new Error("Provider do signer indisponível");
+  if (!provider) throw new Error("Provider not available from signer");
 
   // 0) opcional: confirma owner
   try {
     const [owner, me] = await Promise.all([c.owner(), signer.getAddress()]);
     if (!sameAddr(owner, me)) {
-      throw new Error(`A conta conectada não é o owner.\nOwner: ${owner}\nVocê:  ${me}`);
+      throw new Error(`Account is not owner.\nOwner: ${owner}\nYou:  ${me}`);
     }
   } catch {
     // se falhar a leitura, seguimos (onlyOwner vai proteger)
@@ -192,7 +197,7 @@ export async function startNewRound(signer, roundId) {
 
   // 2) Validar roundId > currentRound
   if (next <= curr) {
-    throw new Error(`Round ID deve ser maior que o atual (${curr}). Sugestão: ${curr + 1n}`);
+    throw new Error(`Round ID should be higher than active.  (${curr}). Sugest: ${curr + 1n}`);
   }
 
   // 3) Validar liquidez do cofre (wONE/USDC)
