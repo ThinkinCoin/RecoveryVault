@@ -1,5 +1,5 @@
 // src/components/ContractFunds.jsx
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import styles from "@/styles/Global.module.css";
 import { useOnePrice } from "@/hooks/useOnePrice";
 import { getVaultStatus, getFeeTiers, getDefaultProvider } from "@/services/vaultCore";
