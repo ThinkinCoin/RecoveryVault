@@ -1,5 +1,5 @@
 // src/components/ContractFunds.jsx
-import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
 import { useOnePrice } from "@/hooks/useOnePrice";
 import { getVaultStatus, getFeeTiers, getDefaultProvider } from "@/services/vaultCore";
@@ -138,9 +138,8 @@ export default function ContractFunds() {
       console.log("[ContractFunds] compute via vaultService");
 
       // Read-only provider for contract reads
-      const provider = useMemo(() => {
-        try { return getDefaultProvider?.() || null; } catch { return null; }
-      }, []);
+      const provider = getDefaultProvider() || ctxProvider;
+      if (!provider) throw new Error("No provider available");
 
       // 1) Get current balances and base status
       const status = await getVaultStatus(provider);
