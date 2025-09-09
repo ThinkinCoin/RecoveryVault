@@ -3,8 +3,7 @@
   "version": "1.0.0-dev",
   "description": "Fixed price redemption vault for depegged tokens on Harmony",
   "homepage": "https://vault.thinkincoin.com",
-
-  "main": "maain.js",
+  "main": "main.js",
   "scripts": {
     "compile": "hardhat compile",
     "test:unit": "vitest run --dir test/unit",
@@ -17,7 +16,8 @@
     "set:merkle": "npx hardhat run scripts/setMerkleProof.js --network harmony",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview", 
+    "snap:wl": "node scripts/snap-strategy-wl.js -i public/data/prehack_list.txt -c public/snap-cfg.json -wout public/snap-str.json -N 1666600000 -b latest -W 1 -C as-is -u https://raw.githubusercontent.com/mzfshark/RecoveryVault/refs/heads/development/public/snap-str.json"
   },
   "keywords": [
     "Recovery Harmony"
@@ -31,9 +31,11 @@
     "@reduxjs/toolkit": "^2.8.2",
     "@reown/appkit": "^1.8.1",
     "@reown/appkit-adapter-ethers": "^1.8.1",
+    "@reown/appkit-common": "^1.8.1",
     "@typechain/hardhat": "9.1.0",
     "@types/chai": "5.2.2",
     "@types/mocha": "10.0.10",
+    "@walletconnect/universal-provider": "^2.21.8",
     "hardhat-gas-reporter": "2.3.0",
     "keccak256": "^1.0.6",
     "merkletreejs": "0.5.2",

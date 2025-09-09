@@ -1,19 +1,40 @@
-// App-level provider for Reown AppKit (WalletConnect) + ethers v6 adapter
-// All texts/logs in English
-
+// services/appkit.js
 import { createAppKit } from '@reown/appkit/react';
 import { EthersAdapter } from '@reown/appkit-adapter-ethers';
 import { defineChain } from '@reown/appkit/networks';
+import { JsonRpcProvider } from 'ethers';
 
-const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
+export const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
+const DEFAULT_RPC_FALLBACK = 'https://api.harmony.one';
 
-// Prefer the Harmony var, fall back to generic
-const RPC_URL =
-  import.meta.env.VITE_RPC_URL_HARMONY ??
-  import.meta.env.VITE_RPC_URL ??
-  '';
+function safeRpcUrl() {
+  const cands = [
+    import.meta.env.VITE_RPC_URL_HARMONY?.trim(),
+    import.meta.env.VITE_RPC_URL?.trim(),
+    DEFAULT_RPC_FALLBACK
+  ].filter(Boolean);
+  for (const c of cands) {
+    try {
+      const u = new URL(c);
+      if (u.protocol === 'http:' || u.protocol === 'https:') return u.toString();
+    } catch {}
+  }
+  return DEFAULT_RPC_FALLBACK;
+}
 
-const CAIP_ID = `eip155:${CHAIN_ID}`;
+function toHttps(u) {
+  try {
+    const url = new URL(u);
+    if (url.protocol !== 'https:') url.protocol = 'https:';
+    return url.toString();
+  } catch {
+    return u;
+  }
+}
+
+export const RPC_URL = safeRpcUrl();
+export const PROJECT_ID = (import.meta.env.VITE_REOWN_PROJECT_ID || '').trim();
+export const CAIP_ID = `eip155:${CHAIN_ID}`;
 
 export const harmony = defineChain({
   id: CHAIN_ID,
@@ -21,82 +42,146 @@ export const harmony = defineChain({
   chainNamespace: 'eip155',
   name: 'Harmony',
   nativeCurrency: { name: 'ONE', symbol: 'ONE', decimals: 18 },
-  rpcUrls: { default: { http: [RPC_URL] } },
-  blockExplorers: {
-    default: { name: 'Harmony Explorer', url: 'https://explorer.harmony.one' }
-  }
+  rpcUrls: { default: { http: [RPC_URL] }, public: { http: [RPC_URL] } },
+  blockExplorers: { default: { name: 'Harmony Explorer', url: 'https://explorer.harmony.one' } },
+  testnet: false
 });
 
-// Vite uses import.meta.env, not process.env
-const projectId = (import.meta.env.VITE_REOWN_PROJECT_ID || '6ff2ca0616c53aac6bc306fe0b678a8f').trim();
-if (!projectId) {
-  console.error('[AppKit] Missing VITE_REOWN_PROJECT_ID');
-}
-
+// --- Dynamic metadata (prod/dev) ---
 const isProd = import.meta.env.PROD;
-const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
-const appUrl = isProd
-  ? (import.meta.env.VITE_REOWN_APP_URL || pageOrigin)
-  : pageOrigin;
-const appIcon = isProd
-  ? (import.meta.env.VITE_REOWN_APP_ICON || `${appUrl}/icon-512.png`)
-  : `${pageOrigin}/icon-512.png`;
+const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
+const isDevHost = /(^|\.)recoverydev\.thinkincoin\.com$/i.test(HOST);
+
+// Always use the actual page origin to avoid WalletConnect metadata.url mismatch
+const appUrl = origin;
+
+// Choose icon per host (dev/prod), fallback to current origin asset
+const appIconRaw =
+  (isDevHost ? (import.meta.env.VITE_REOWN_DEV_ICON?.trim()) : (import.meta.env.VITE_REOWN_APP_ICON?.trim()))
+  || `${origin}/icon-512.png`;
+const appIcon = toHttps(appIconRaw);
 
 const metadata = {
-  name: import.meta.env.VITE_APP_NAME || 'Recovery Vault',
-  description: 'Fixed redemption UI for pre-hack wallets',
-  url: appUrl,
+  name: import.meta.env.VITE_PROJECT_NAME || import.meta.env.VITE_APP_NAME || 'Recovery Vault',
+  description: 'Fixed redemption UI for pre-hack wallets (Harmony only)',
+  url: origin, // <- critical: match current origin
   icons: [appIcon]
 };
 
-// Important: create the AppKit instance at module scope (outside React trees)
-const ethersAdapter = new EthersAdapter();
-
-// Only initialize if we actually have a projectId to avoid 400/403 noise
-export const modal = projectId
-  ? createAppKit({
-      adapters: [ethersAdapter],
-      networks: [harmony],
-      projectId,
-      metadata,
-
-      // Harmony-only UX
-      defaultNetwork: harmony,
-      enableNetworkSwitch: false,
-      allowUnsupportedChain: false,
-
-      // Keep WalletConnect enabled and allow injected wallets if needed
-      enableWalletConnect: true,
-      enableWallets: true,
-
-      // Hard-pin RPC for Harmony
-      customRpcUrls: {
-        [CAIP_ID]: [{ url: RPC_URL }]
-      },
-
-      // Restrict WC provider strictly to Harmony
-      universalProviderConfigOverride: {
-        // IMPORTANT: chains must be CAIP strings, not numeric ids
-        chains: { eip155: [CAIP_ID] },
-        defaultChain: CAIP_ID,
-        rpcMap: { [CAIP_ID]: RPC_URL }
-      },
-
-      // Helpful while testing
-      enableReconnect: true,
-      debug: true,
-
-      // Disable extras we don't use
-      features: { analytics: false, swaps: false, onramp: false }
-    })
-  : null;
-
-// Ethers path doesn't need a special React provider wrapper.
-// Keep API compatible with the rest of the app.
-export function ReownProvider({ children }) {
-  if (!projectId) {
-    // Render children anyway; just the connect modal is disabled.
-    return children;
+// --- Purge stale WalletConnect v2 sessions when origin changes ---
+function purgeWalletConnectIfOriginChanged() {
+  try {
+    const KEY = 'app:lastOrigin';
+    const cur = (typeof window !== 'undefined' && window.location?.origin) || '';
+    const last = localStorage.getItem(KEY);
+    if (last && last !== cur) {
+      const keys = Object.keys(localStorage);
+      for (const k of keys) {
+        const kl = k.toLowerCase();
+        if (kl.startsWith('wc@2') || kl.includes('walletconnect')) {
+          localStorage.removeItem(k);
+        }
+      }
+    }
+    if (cur) localStorage.setItem(KEY, cur);
+  } catch (e) {
+    console.warn('[appkit] purgeWalletConnectIfOriginChanged failed:', e);
   }
+}
+
+let _readProvider = /** @type {JsonRpcProvider|null} */ (null);
+export function getReadProvider() {
+  if (_readProvider) return _readProvider;
+  try {
+    _readProvider = new JsonRpcProvider(RPC_URL, { chainId: CHAIN_ID, name: 'harmony' });
+  } catch (e) {
+    console.error('[appkit] JsonRpcProvider creation failed:', e);
+    _readProvider = null;
+  }
+  return _readProvider;
+}
+export const readProvider = getReadProvider();
+
+let appkit = /** @type {import('@reown/appkit/react').AppKit | null} */(null);
+
+export function ensureInit() {
+  try { purgeWalletConnectIfOriginChanged(); } catch (e) { console.warn('[appkit] purge failed:', e); }
+  if (appkit || !PROJECT_ID) return appkit;
+
+  const ethersAdapter = new EthersAdapter();
+  const debugFlag = String(import.meta.env.VITE_APPKIT_DEBUG ?? (import.meta.env.DEV ? 'true' : 'false')) === 'true';
+
+  appkit = createAppKit({
+    projectId: PROJECT_ID,
+    adapters: [ethersAdapter],
+
+    networks: [harmony],
+    defaultNetwork: harmony,
+    allowUnsupportedChain: false,
+    enableNetworkSwitch: true,
+
+    enableWallets: true,
+    enableWalletConnect: true,
+
+    features: {
+      analytics: false,
+      swaps: false,
+      onramp: false,
+      connectMethodsOrder: ['wallet', 'qrcode']
+    },
+
+    customRpcUrls: { [CAIP_ID]: [{ url: RPC_URL }] },
+    debug: debugFlag,
+    metadata
+  });
+
+  return appkit;
+}
+
+export function ReownProvider({ children }) {
+  try { ensureInit(); } catch (e) { console.error('[appkit] init failed:', e); }
   return children;
+}
+
+export function getAppKitInstance() {
+  return ensureInit();
+}
+
+export async function openConnect() {
+  ensureInit()?.open?.({ view: 'Connect', namespace: 'eip155' });
+}
+export async function closeConnect() {
+  appkit?.close?.();
+}
+export async function disconnectWallet() {
+  try { await appkit?.disconnect?.(); } catch {}
+}
+export async function getActiveWalletProvider() {
+  return ensureInit()?.getWalletProvider?.() || null;
+}
+
+// Exported JSON-RPC debug wrapper to aid diagnosing RPC errors
+// Wraps any EIP-1193 compatible provider.request and logs method/params on failures
+export function attachRpcDebug(provider, label = 'wallet') {
+  try {
+    if (!provider || typeof provider.request !== 'function') return provider;
+
+    // Avoid double wrapping (e.g., HMR)
+    const FLAG = '__rvRpcDebugWrapped__';
+    if (provider[FLAG]) return provider;
+
+    const original = provider.request.bind(provider);
+    Object.defineProperty(provider, FLAG, { value: true, enumerable: false });
+
+    provider.request = async (args) => {
+      try {
+        return await original(args);
+      } catch (e) {
+        console.error('[RPC DEBUG]', label, args?.method, args?.params, e);
+        throw e;
+      }
+    };
+  } catch {}
+  return provider;
 }

@@ -64,7 +64,7 @@ export default function LoadConsole({
 }
 
 const styles = {
-  wrap: { position: "fixed", right: 12, bottom: 12, width: 420, maxWidth: "90vw", background: "rgba(20,22,26,0.95)", color: "white", borderRadius: 12, boxShadow: "0 8px 30px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,0.08)", zIndex: 9999, backdropFilter: "blur(6px)" },
+  wrap: { position: "fixed", left: 12, bottom: 12, width: 420, maxWidth: "90vw", background: "rgba(20,22,26,0.95)", color: "white", borderRadius: 12, boxShadow: "0 8px 30px rgba(0,0,0,.35)", border: "1px solid rgba(255,255,255,0.08)", zIndex: 9999, backdropFilter: "blur(6px)" },
   header: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)", fontSize: 14 },
   box: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, Monaco, monospace", fontSize: 12, lineHeight: "18px", maxHeight: 220, overflow: "auto", padding: 10 },
   btn: { appearance: "none", background: "transparent", color: "white", border: "none", fontSize: 18, cursor: "pointer", padding: 2 },

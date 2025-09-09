@@ -1,152 +1,307 @@
-// src/components/redeem/RedeemForm.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ethers, formatUnits, parseUnits } from "ethers";
+import { Contract, formatUnits, parseUnits } from "ethers";
 import { useAppKitAccount } from "@reown/appkit/react";
+import { getActiveWalletProvider } from "@/services/appkit";
 import styles from "@/styles/Global.module.css";
 import { useContractContext } from "@/contexts/ContractContext";
-import * as vaultService from "@/services/vaultService";
+import * as core from "@/services/vaultCore";
+import * as redeemSvc from "@/services/redeemService";
 import TokenSelect from "@/components/shared/TokenSelect";
 import ReCAPTCHA from "react-google-recaptcha";
-import { preloadProofs, useWhitelist } from "@/services/whitelistService";
-import { preflightAmountAgainstLimit, quoteAmountUsd18, fetchRemainingUsd18 } from "@/services/limitsService";
+import { useWhitelist } from "@/services/whitelistService";
 import LoadConsole from "@/components/shared/LoadConsole";
-
-import { log as debugLog, ok as debugOk, warn as debugWarn, error as debugError } from "@/debug/logger";
-
-
-
-
-const FN_REDEEM_CANDIDATES = ["redeem(address,uint256,address,bytes32[])"];
-
-// UPDATED: adiciona variações para caber no revert do contrato (“Exceeds daily limit”)
-function friendlySimError(text) {
-  const t = String(text || "").toLowerCase();
-  if (t.includes("address not whitelisted")) return "Address not whitelisted";
-   if (
-     t.includes("exceeds daily limit") ||
-     t.includes("insufficient remaining daily limit") ||
-     t.includes("amount exceeds daily limit")
-   ) return "Insufficient remaining daily limit";
-  if (t.includes("missing revert data")) return "Execution reverted (no reason). Check args/signature.";
-  if (t.includes("execution reverted")) return "Execution reverted";
-  return text || "Simulation failed";
-}
+import { useOnePrice } from "@/hooks/useOnePrice";
+//import OracleDebugPanel from "@/components/OracleDebugPanel";
 
 const ERC20_MINI = [
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address spender, uint256 value) returns (bool)",
   "function decimals() view returns (uint8)",
   "function symbol() view returns (string)",
   "function balanceOf(address) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)"
 ];
 
-const VAULT_READ_ABI = ["function fixedUsdPrice(address token) view returns (uint256)"];
+const ORACLE_TTL_MS = 30000;
+const ROUND_TTL_MS = 15000;
+const FEES_TTL_MS = 60000;
+const FIXED_TTL_MS = 60000;
+const USERLIMIT_TTL_MS = 20000;
+const CHAIN_QUOTE_TIMEOUT_MS = Number(import.meta.env.VITE_CHAIN_QUOTE_TIMEOUT_MS ?? 2500);
 
-export default function RedeemForm({ address: addressProp }) {
-  const { provider: ctxProvider } = useContractContext();
-  const { isConnected, address: appkitAddress } = useAppKitAccount();
+const TOKEN_META_CACHE = new Map();
+async function getTokenMetaCached(provider, addr){
+  const key = String(addr || "").toLowerCase();
+  if (TOKEN_META_CACHE.has(key)) return TOKEN_META_CACHE.get(key);
+  try {
+    const erc = new Contract(addr, ERC20_MINI, provider);
+    const [dec, sym] = await Promise.all([
+      erc.decimals().catch(() => 18),
+      erc.symbol().catch(() => "TOKEN")
+    ]);
+    const meta = { decimals: Number(dec) || 18, symbol: String(sym || "TOKEN") };
+    TOKEN_META_CACHE.set(key, meta);
+    return meta;
+  } catch {
+    const meta = { decimals: 18, symbol: "TOKEN" };
+    TOKEN_META_CACHE.set(key, meta);
+    return meta;
+  }
+}
 
-  const readProvider = useMemo(() => vaultService.getDefaultProvider?.() || null, []);
+function formatUnitsFixed(raw, tokenDecimals, fractionDigits = 2) {
+  const v = BigInt(raw ?? 0n);
+  const d = BigInt(tokenDecimals ?? 18);
+  const f = BigInt(Math.max(0, fractionDigits|0));
+
+  // Queremos arredondar v / 10^d para f casas
+  if (d >= f) {
+    const pow = 10n ** (d - f);
+    const rounded = (v + pow / 2n) / pow; // round half-up
+    let s = rounded.toString();
+    if (f === 0n) return s;
+    const fd = Number(f);
+    if (s.length <= fd) s = "0".repeat(fd - s.length + 1) + s;
+    const i = s.length - fd;
+    return `${s.slice(0, i)}.${s.slice(i)}`;
+  } else {
+    // d < f: não há fração; só precisamos “adicionar zeros” à direita
+    const powUp = 10n ** (f - d);
+    let s = (v * powUp).toString();
+    const fd = Number(f);
+    if (s.length <= fd) s = "0".repeat(fd - s.length + 1) + s;
+    const i = s.length - fd;
+    return `${s.slice(0, i)}.${s.slice(i)}`;
+  }
+}
+
+function rpcFriendly(e){
+  const code = e?.code;
+  const raw = e?.data?.message || e?.error?.message || e?.shortMessage || e?.reason || e?.message || String(e || "");
+  const s = String(raw || "").toLowerCase();
+  if (code === 'ACTION_REJECTED' || code === 4001 || s.includes('user rejected') || s.includes('userrejectedrequest')) return "Transaction rejected by user";
+  if (code === -32002 || s.includes('request already pending')) return "Request already pending in wallet. Open your wallet and complete or cancel it.";
+  if (code === 'UNPREDICTABLE_GAS_LIMIT' || s.includes('unpredictable gas') || s.includes('gas estimation')) return "Gas estimation failed. Try again or adjust the amount.";
+  if (code === 'CALL_EXCEPTION' || s.includes('call exception') || s.includes('execution reverted')){
+    const i = raw.indexOf(":");
+    const tail = i >= 0 ? raw.slice(i+1).trim() : "";
+    return tail || "Transaction reverted by contract";
+  }
+  if (s.includes('providerdisconnected') || s.includes('chaindisconnected') || s.includes('chain disconnected') || code === 'providerDisconnected') return "Wallet/provider disconnected. Reconnect your wallet and try again.";
+  if (s.includes("insufficient funds")) return "Insufficient funds (gas or value)";
+  if (s.includes("insufficient allowance")) return "Insufficient allowance for selected token";
+  if (s.includes("nonce too low")) return "Nonce too low. Try again";
+  if (s.includes("replacement transaction underpriced") || s.includes("underpriced") || code === -32000) return "Invalid input or underpriced replacement";
+  if (code === 429 || s.includes("rate limit") || s.includes("too many requests")) return "RPC rate limited. Please wait and try again";
+  if (code === -32603 || s.includes("internal json-rpc error")) return "RPC error (-32603). Please retry or reconnect your wallet";
+  if (s.includes("missing revert data")) return "Execution reverted (no reason)";
+  return raw || "Unexpected error";
+}
+
+export default function RedeemForm({ address: addressProp, debounceMs }) {
+  const { provider: ctxProvider, signer: ctxSigner } = useContractContext();
+  const { isConnected, address: appkitAddress } = useAppKitAccount({ namespace: "eip155" });
+  const { price: oneUsdFloat } = useOnePrice();
+
+  const readProvider = useMemo(() => {
+    if (ctxProvider) return ctxProvider;
+    try { return core.getDefaultProvider?.(); } catch { return undefined; }
+  }, [ctxProvider]);
   const address = useMemo(() => addressProp || appkitAddress || "", [addressProp, appkitAddress]);
 
-  // Vault data
+  const CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID ?? 1666600000);
+  const CHAIN_ID_HEX = `0x${CHAIN_ID.toString(16)}`.toLowerCase();
+  const RPC_URL = (import.meta.env.VITE_RPC_URL_HARMONY?.trim() || import.meta.env.VITE_RPC_URL?.trim() || "https://api.harmony.one");
+  const INPUT_DEBOUNCE_MS = Number(debounceMs ?? import.meta.env.VITE_INPUT_DEBOUNCE_MS ?? 800);
+
+  async function ensureHarmony() {
+    const prov = await getActiveWalletProvider?.();
+    if (!prov?.request) return;
+    const current = await prov.request({ method: "eth_chainId" }).catch(() => null);
+    if (String(current).toLowerCase() === CHAIN_ID_HEX) return;
+    try {
+      await prov.request({ method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN_ID_HEX }] });
+    } catch (err) {
+      if (err?.code === 4902) {
+        try {
+          await prov.request({
+            method: "wallet_addEthereumChain",
+            params: [{
+              chainId: CHAIN_ID_HEX,
+              chainName: "Harmony Mainnet",
+              rpcUrls: [RPC_URL],
+              nativeCurrency: { name: "ONE", symbol: "ONE", decimals: 18 },
+              blockExplorerUrls: ["https://explorer.harmony.one/"]
+            }]
+          });
+        } catch (e) { throw new Error(rpcFriendly(e)); }
+        try {
+          await prov.request({ method: "wallet_switchEthereumChain", params: [{ chainId: CHAIN_ID_HEX }] });
+        } catch (e) { throw new Error(rpcFriendly(e)); }
+      } else {
+        throw new Error(rpcFriendly(err));
+      }
+    }
+  }
+
   const [supportedTokens, setSupportedTokens] = useState([]);
   const [wone, setWone] = useState("");
   const [usdc, setUsdc] = useState("");
   const [usdcDecimals, setUsdcDecimals] = useState(6);
   const [vaultBalances, setVaultBalances] = useState({ woneBalance: 0n, usdcBalance: 0n });
 
-  // Form
   const [tokenIn, setTokenIn] = useState("");
   const [redeemIn, setRedeemIn] = useState("");
   const [amountHuman, setAmountHuman] = useState("");
+  const [debouncedAmount, setDebouncedAmount] = useState("");
 
-  // Wallet token meta
   const [balances, setBalances] = useState(new Map());
   const selected = tokenIn ? balances.get(tokenIn.toLowerCase()) : null;
   const selectedBalance = selected?.raw ?? 0n;
   const selectedDecimals = selected?.decimals ?? 18;
   const selectedSymbol = selected?.symbol ?? "";
 
-  // Preço fixo (texto)
   const [fixedPriceText, setFixedPriceText] = useState("");
 
-  // USD em 18 decimais (contrato)
-  const [limitUSD18, setLimitUSD18] = useState(0n);
-  const [amountUSD18, setAmountUSD18] = useState(0n);
+  const [limitUSD4, setLimitUSD4] = useState(0n);   // USD * 1e4
+  const [amountUSD4, setAmountUSD4] = useState(0n);
 
-  // NEW: preview “Will receive”
-  const [receivePreview, setReceivePreview] = useState(null); // { raw, decimals, symbol }
+  const [receivePreview, setReceivePreview] = useState(null);
 
-  // UI
   const [busy, setBusy] = useState(false);
   const [loadingBase, setLoadingBase] = useState(true);
   const [loadingBalances, setLoadingBalances] = useState(false);
   const [uiNotice, setUiNotice] = useState(null);
-  // ---- Load logs / progress (preload UX) ----
   const [bootOpen, setBootOpen] = useState(true);
-  const [bootLogs, setBootLogs] = useState([]); // {ts,msg,level}
+  const [bootLogs, setBootLogs] = useState([]);
   const [bootStepsDone, setBootStepsDone] = useState(0);
-  const TOTAL_STEPS = 6; // supportedTokens, wone/usdc, vaultBalances, balances, whitelist, limit
-  const addLog = useCallback((msg, level="info") => {
-    setBootLogs((prev) => [...prev, { ts: Date.now(), msg, level }]);
-  }, []);
-  const stepOk = useCallback((msg) => { addLog(msg, "ok"); setBootStepsDone((s)=>s + 1); }, [addLog]);
-  const stepWarn = useCallback((msg) => { addLog(msg, "warn"); setBootStepsDone((s)=>s + 1); }, [addLog]);
-  const stepErr = useCallback((msg) => { addLog(msg, "error"); setBootStepsDone((s)=>s + 1); }, [addLog]);
+  const addLog = useCallback((msg, level = "info") => { setBootLogs((prev) => [...prev, { ts: Date.now(), msg, level }]); }, []);
+  const stepOk   = useCallback((msg) => { addLog(msg, "ok");   setBootStepsDone((s) => s + 1); }, [addLog]);
+  const stepWarn = useCallback((msg) => { addLog(msg, "warn"); setBootStepsDone((s) => s + 1); }, [addLog]);
+  const stepErr  = useCallback((msg) => { addLog(msg, "error");setBootStepsDone((s) => s + 1); }, [addLog]);
 
-
-  // reCAPTCHA
   const recaptchaSiteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY;
   const RECAPTCHA_ENABLED = import.meta.env.VITE_ENABLE_RECAPTCHA === "true";
   const recaptchaRef = useRef(null);
 
-  useEffect(() => {
-    preloadProofs().catch(() => {});
+  const oracleCacheRef = useRef({ ts: 0, value: null });
+  const roundCacheRef = useRef({ ts: 0, value: null });
+  const feeCacheRef = useRef({ ts: 0, value: null });
+  const fixedCacheRef = useRef(new Map());
+  const userLimitCacheRef = useRef({ ts: 0, value: null });
+  const runIdRef = useRef(0);
+
+  const [roundActive, setRoundActive] = useState(false);
+
+  const isValidHuman = useCallback((s) => {
+    const str = String(s ?? "");
+    if (str === "" || str === ".") return false;
+    return /^\d*\.?\d*$/.test(str);
   }, []);
 
-  // Base load
+  const parseUnitsSafe = useCallback((s, dec) => {
+    try { if (!isValidHuman(s)) return null; return parseUnits(String(s), dec); } catch { return null; }
+  }, [isValidHuman]);
+
+ const getCachedOracle = useCallback(async () => {
+   // Try hook first (ONE price in USD, 18 dec)
+   const n = Number(oneUsdFloat);
+   if (Number.isFinite(n) && n > 0) {
+     const p18 = BigInt(Math.round(n * 1e18));
+     return { price: p18, decimals: 18 };
+   }
+   // Fallback to core (must also be USD per ONE, 18 dec)
+   const now = Date.now();
+   if (oracleCacheRef.current.value && now - oracleCacheRef.current.ts < ORACLE_TTL_MS) {
+     return oracleCacheRef.current.value;
+   }
+   const out = await core.oracleLatest(readProvider).catch(() => ({ price: 0n, decimals: 18 }));
+   // If core returns inverted (ONE per USD), heuristically invert (>1 means likely inverted)
+   oracleCacheRef.current = { ts: now, value: out };
+   return out;
+  }, [readProvider, oneUsdFloat]);
+
+  const getCachedRoundInfo = useCallback(async () => {
+    const now = Date.now();
+    if (roundCacheRef.current.value && now - roundCacheRef.current.ts < ROUND_TTL_MS) return roundCacheRef.current.value;
+    const out = await core.getRoundInfo(readProvider).catch(() => null);
+    roundCacheRef.current = { ts: now, value: out };
+    return out;
+  }, [readProvider]);
+
+  const getCachedFeeTiers = useCallback(async () => {
+    const now = Date.now();
+    if (feeCacheRef.current.value && now - feeCacheRef.current.ts < FEES_TTL_MS) return feeCacheRef.current.value;
+    const out = await core.getFeeTiers(readProvider).catch(() => ({ thresholds: [], bps: [] }));
+    feeCacheRef.current = { ts: now, value: out };
+    return out;
+  }, [readProvider]);
+
+  const getCachedFixedPrice = useCallback(async (token) => {
+    const key = String(token || "").toLowerCase();
+    const now = Date.now();
+    const hit = fixedCacheRef.current.get(key);
+    if (hit && now - (hit.ts || 0) < FIXED_TTL_MS) return hit.value;
+    const val = await core.fixedUsdPrice(readProvider, token).catch(() => 0n);
+    fixedCacheRef.current.set(key, { ts: now, value: val });
+    return val;
+  }, [readProvider]);
+
+  const getCachedUserLimit = useCallback(async (wallet) => {
+    const now = Date.now();
+    if (userLimitCacheRef.current.value && now - userLimitCacheRef.current.ts < USERLIMIT_TTL_MS) {
+      return userLimitCacheRef.current.value; // { remainingUSD }
+    }
+    const val = await core.getUserLimitObject(readProvider, wallet).catch(() => ({ remainingUSD: 0n }));
+    userLimitCacheRef.current = { ts: now, value: val };
+    return val; // { remainingUSD: <USD4> }
+  }, [readProvider]);
+
+
+  useEffect(() => {
+    if (ctxProvider) return;
+    try { core.getDefaultProvider(); }
+    catch { setUiNotice((n) => n ?? { type: "warning", text: "RPC not configured (VITE_RPC_URL). Connect a wallet or set RPC URL." }); }
+  }, [ctxProvider]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedAmount(amountHuman), INPUT_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [amountHuman, INPUT_DEBOUNCE_MS]);
+
   useEffect(() => {
     let alive = true;
+    setBootStepsDone(0);
+    setBootLogs([]);
     (async () => {
       try {
         if (!readProvider) return;
         setLoadingBase(true);
         addLog("Initializing vault data…");
-        addLog("Fetching supported tokens…");
-        debugLog("RedeemForm: fetching supported tokens…");
         const [sup, w, u, bals] = await Promise.all([
-          vaultService.getSupportedTokens?.(readProvider).catch(() => []),
-          vaultService.wONE?.(readProvider).catch(() => ""),
-          vaultService.usdc?.(readProvider).catch(() => ""),
-          vaultService.getVaultBalances?.(readProvider).catch(() => ({ woneBalance: 0n, usdcBalance: 0n })),
+          core.getSupportedTokens?.(readProvider).catch(() => []),
+          core.wONE?.(readProvider).catch(() => ""),
+          core.usdc?.(readProvider).catch(() => ""),
+          core.getVaultBalances?.(readProvider).catch(() => ({ woneBalance: 0n, usdcBalance: 0n })),
         ]);
         if (!alive) return;
-
-
-
-        const supArr = Array.isArray(sup) ? sup.filter(Boolean) : [];
-        stepOk(`Supported tokens: ${Array.isArray(sup) ? sup.length : 0}`);
-        debugOk(`RedeemForm: supported tokens loaded (${supArr.length})`);
+        const supArr = [...new Set((Array.isArray(sup) ? sup : []).map(a => a && String(a).toLowerCase()).filter(a => a && a !== '0x0000000000000000000000000000000000000000'))];
+        stepOk(`Supported tokens: ${supArr.length}`);
         setSupportedTokens(supArr);
         setWone(w || "");
         setUsdc(u || "");
         setVaultBalances(bals || { woneBalance: 0n, usdcBalance: 0n });
         stepOk("Core addresses/balances loaded");
-
         if (u) {
           try {
-            const erc = new ethers.Contract(u, ERC20_MINI, readProvider);
+            const erc = new Contract(u, ERC20_MINI, readProvider);
             const d = await erc.decimals();
+            if (!alive) return;
             setUsdcDecimals(Number(d) || 6);
           } catch {
+            if (!alive) return;
             setUsdcDecimals(6);
             stepWarn("USDC decimals fetch failed: using default 6");
-            debugWarn("USDC decimals fetch failed: defaulting to 6");
-
           }
         }
-
         if (!redeemIn) {
           if ((bals?.woneBalance ?? 0n) > 0n) setRedeemIn(w || "");
           else if ((bals?.usdcBalance ?? 0n) > 0n) setRedeemIn(u || "");
@@ -155,17 +310,13 @@ export default function RedeemForm({ address: addressProp }) {
         if (!tokenIn && supArr[0]) setTokenIn(supArr[0]);
       } catch (e) {
         stepErr(`Base load error: ${e?.message || String(e)}`);
-        debugError(`Base load error: ${e.message}`);
       } finally {
         if (alive) setLoadingBase(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [readProvider]);
 
-  // Wallet balances
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -173,23 +324,30 @@ export default function RedeemForm({ address: addressProp }) {
         if (!readProvider || !address || supportedTokens.length === 0) return;
         setLoadingBalances(true);
         addLog("Loading your token balances…");
-
-        const entries = await Promise.all(
-          supportedTokens.map(async (addr) => {
-            try {
-              const erc = new ethers.Contract(addr, ERC20_MINI, readProvider);
-              const [dec, sym, bal] = await Promise.all([
-                erc.decimals(),
-                erc.symbol().catch(() => "TOKEN"),
-                erc.balanceOf(address).catch(() => 0n),
-              ]);
-              return [addr.toLowerCase(), { raw: bal ?? 0n, decimals: Number(dec) || 18, symbol: String(sym || "TOKEN") }];
-            } catch {
-              return [addr.toLowerCase(), { raw: 0n, decimals: 18, symbol: "TOKEN" }];
+        let entries = null;
+        if (typeof core.batchBalances === "function") {
+          try {
+            const map = await core.batchBalances(readProvider, address, supportedTokens);
+            if (map && typeof map === 'object') {
+              entries = Object.entries(map).map(([addr, info]) => [String(addr).toLowerCase(), info]);
             }
-          })
-        );
-
+          } catch {}
+        }
+        if (!entries) {
+          const list = await Promise.all(
+            supportedTokens.map(async (addr) => {
+              try {
+                const meta = await getTokenMetaCached(readProvider, addr);
+                const erc = new Contract(addr, ERC20_MINI, readProvider);
+                const bal = await erc.balanceOf(address).catch(() => 0n);
+                return [String(addr).toLowerCase(), { raw: bal ?? 0n, decimals: meta.decimals, symbol: meta.symbol }];
+              } catch {
+                return [String(addr).toLowerCase(), { raw: 0n, decimals: 18, symbol: "TOKEN" }];
+              }
+            })
+          );
+          entries = list;
+        }
         if (!alive) return;
         setBalances(new Map(entries));
         stepOk("Balances loaded");
@@ -197,51 +355,21 @@ export default function RedeemForm({ address: addressProp }) {
         if (alive) setLoadingBalances(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [readProvider, address, supportedTokens]);
 
-  // Metadata for newly picked token
-  useEffect(() => {
-    (async () => {
-      if (!readProvider || !address || !tokenIn) return;
-      const key = tokenIn.toLowerCase();
-      if (balances.has(key)) return;
-      try {
-        const erc = new ethers.Contract(tokenIn, ERC20_MINI, readProvider);
-        const [dec, sym, bal] = await Promise.all([
-          erc.decimals(),
-          erc.symbol().catch(() => "TOKEN"),
-          erc.balanceOf(address).catch(() => 0n),
-        ]);
-        setBalances((prev) => {
-          const copy = new Map(prev);
-          copy.set(key, { raw: bal ?? 0n, decimals: Number(dec) || 18, symbol: String(sym || "TOKEN") });
-          return copy;
-        });
-      } catch {}
-    })();
-  }, [readProvider, address, tokenIn, balances]);
-
-  // Fixed price display
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         setFixedPriceText("");
         if (!readProvider || !tokenIn) return;
-
-        const vaultAddr = vaultService.getVaultAddress?.() || import.meta.env.VITE_VAULT_ADDRESS || "";
-        if (!vaultAddr) return;
-
-        const c = new ethers.Contract(vaultAddr, VAULT_READ_ABI, readProvider);
-        const p = await c.fixedUsdPrice(tokenIn).catch(() => 0n);
+        const p = await getCachedFixedPrice(tokenIn).catch(() => 0n);
         const txt = formatUnits(p ?? 0n, 18);
         if (!alive) return;
         if (p && p !== 0n) {
           const num = Number(txt);
-          setFixedPriceText(Number.isFinite(num) ? `$${num.toFixed(6)}` : `$${txt}`);
+          setFixedPriceText(Number.isFinite(num) ? `$${num.toFixed(2)}` : `$${txt}`);
         } else {
           setFixedPriceText("");
         }
@@ -249,288 +377,384 @@ export default function RedeemForm({ address: addressProp }) {
         if (alive) setFixedPriceText("");
       }
     })();
-    return () => {
-      alive = false;
-    };
-  }, [readProvider, tokenIn]);
+    return () => { alive = false; };
+  }, [readProvider, tokenIn, getCachedFixedPrice]);
 
-  // Whitelist hook
   const { loading: wlLoading, ok: wlOk, error: wlError, proof: wlProof } = useWhitelist(address, readProvider);
-  const bootBusy = loadingBase || loadingBalances || wlLoading || (limitUSD18 === 0n && !!address);
-  const bootProgress = Math.min(100, Math.round((bootStepsDone / TOTAL_STEPS) * 100));
 
-  useEffect(() => {
-    if (!address || !readProvider) return;
-    if (wlLoading) addLog("Checking whitelist status…");
-    else if (wlOk) stepOk("Whitelist: OK");
-    else if (wlError) stepWarn(`Whitelist: ${wlError}`);
-  }, [wlLoading, wlOk, wlError, address, readProvider]);
-
-  // Limite diário restante (USD 18dps)
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        if (!readProvider || !address) return;
-        addLog("Fetching remaining daily limit…");
-        const rem = await fetchRemainingUsd18(readProvider, address);
-        if (alive) setLimitUSD18(rem);
-        if (alive) stepOk("Limit loaded");
-      } catch {
-        if (alive) setLimitUSD18(0n);
-        stepWarn("Unable to fetch remaining limit");
-      }
+        if (!readProvider) return;
+        const ri = await getCachedRoundInfo();
+        if (!alive) return;
+        setRoundActive(!!ri?.isActive);
+      } catch {}
     })();
-    return () => {
-      alive = false;
-    };
-  }, [readProvider, address]);
+    return () => { alive = false; };
+  }, [readProvider, getCachedRoundInfo]);
 
-  // USD do pedido (USD 18dps)
   useEffect(() => {
-    (async () => {
-      try {
-        if (!readProvider || !tokenIn || !amountHuman || Number(amountHuman) <= 0) {
-          setAmountUSD18(0n);
-          return;
-        }
-        const usd18 = await quoteAmountUsd18(readProvider, tokenIn, amountHuman, selectedDecimals);
-        setAmountUSD18(usd18);
-      } catch {
-        setAmountUSD18(0n);
-      }
-    })();
-  }, [readProvider, tokenIn, amountHuman, selectedDecimals]);
-
-  // NEW: Preview “Will receive” via quoteRedeem (usa amountOutRedeemToken e redeemInDecimals)
-  useEffect(() => {
-    let alive = true;
+    let cancelled = false;
+    const runId = ++runIdRef.current;
     (async () => {
       try {
         setReceivePreview(null);
+        setAmountUSD4(0n);
+
         if (!readProvider || !address || !tokenIn || !redeemIn) return;
-        if (!amountHuman || Number(amountHuman) <= 0) return;
+        if (!debouncedAmount || Number(debouncedAmount) <= 0) return;
+        const amountIn = parseUnitsSafe(debouncedAmount, selectedDecimals);
+        if (amountIn == null) {
+          if (debouncedAmount) setUiNotice({ type: "warning", text: "Enter a valid amount" });
+          return;
+        } else if (uiNotice?.type === "warning" && uiNotice?.text === "Enter a valid amount") {
+          setUiNotice(null);
+        }
 
-        const amountIn = parseUnits(String(amountHuman), selectedDecimals);
-        const proof = wlProof || []; // quoteRedeem não exige whitelist, mas passamos se houver
+        const { remainingUSD: remaining4 } = await getCachedUserLimit(address); // USD * 1e4
+        if (!cancelled && runId === runIdRef.current) setLimitUSD4(BigInt(remaining4 ?? 0n));        
 
-        const q = await vaultService
-          .quoteRedeem(readProvider, address, tokenIn, amountIn, redeemIn, proof)
-          .catch(() => null);
+        const chainPromise = (async () => {
+          try {
+            const proof = wlProof || [];
+            const q = await core.quoteRedeem(readProvider, address, tokenIn, amountIn, redeemIn, proof);
+            return q || null;
+          } catch { return null; }
+        })();
 
-        if (!alive || !q) return;
+        const first = await Promise.race([
+          chainPromise,
+          new Promise((res) => setTimeout(() => res("timeout"), CHAIN_QUOTE_TIMEOUT_MS))
+        ]);
 
-        // Decimals e símbolo do token de saída
-        const outDec =
-          typeof q.redeemInDecimals === "number"
+        const computeLocal = async () => {
+          try {
+            // 1) pegue o snapshot UMA vez por run
+            const oracleSnap = await getCachedOracle(); // { price, decimals }
+            const priceOk = oracleSnap && BigInt(oracleSnap.price ?? 0n) > 0n;
+            const price18 =
+              priceOk
+                ? (BigInt(oracleSnap.price) * 10n ** 18n) / 10n ** BigInt(Number(oracleSnap.decimals ?? 18))
+                : 0n;
+
+            const tokenIsUSDC = usdc && tokenIn && String(usdc).toLowerCase() === String(tokenIn).toLowerCase();
+            const tokenIsONE  = wone && tokenIn && String(wone).toLowerCase() === String(tokenIn).toLowerCase();
+
+            // 2) USD18 do input
+            let usd18 = 0n;
+            if (tokenIsUSDC) {
+              usd18 = (amountIn * 10n ** 18n) / 10n ** BigInt(usdcDecimals || 6);
+            } else if (tokenIsONE) {
+              if (price18 > 0n) {
+                usd18 = (amountIn * price18) / 10n ** BigInt(selectedDecimals);
+              }
+            } else {
+              const fp = await getCachedFixedPrice(tokenIn).catch(() => 0n);
+              if (fp > 0n) usd18 = (amountIn * fp) / 10n ** BigInt(selectedDecimals);
+            }
+
+            // 3) fee tiers (mesma lógica, sem mexer)
+            const tiers = await getCachedFeeTiers().catch(() => ({ thresholds: [], bps: [] }));
+            const usd4 = (usd18 * 10_000n) / 10n**18n;
+            const pickBps = (usdIntVal) => {
+              const th = tiers.thresholds || [];
+              const bpsArr = (tiers.bps || []).map((x) => Number(x || 0));
+              for (let i = 0; i < th.length; i++) {
+                const t = BigInt(th[i] ?? 0n);
+                if (usdIntVal <= t) return Number(bpsArr[i] ?? 0);
+              }
+              return Number(bpsArr[(bpsArr.length || 1) - 1] || 0);
+            };
+            const usdInt = usd18 / 10n**18n;
+            const bps = pickBps(usdInt);
+            const fee = (amountIn * BigInt(bps)) / 10000n;
+            const net = amountIn - fee;
+            const usdNet18 = amountIn > 0n ? (usd18 * net) / amountIn : 0n;
+
+            // 4) output amount
+            const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
+            const outDec = outIsUSDC ? (usdcDecimals || 6) : 18;
+            const outSym = outIsUSDC ? "USDC" : "wONE";
+
+            let amountOut = 0n;
+            if (outIsUSDC) {
+              amountOut = (usdNet18 * 10n ** BigInt(outDec)) / 10n ** 18n;
+            } else {
+              if (price18 > 0n) {
+                amountOut = (usdNet18 * 10n ** 18n) / price18;
+              }
+            }
+
+            // 5) USD (para limite) a partir do *output*
+            const usdOut18 = usdNet18;
+
+            if (!cancelled && runId === runIdRef.current) {
+              const usdOut4 = core.toUsd4(usdOut18);
+
+              setAmountUSD4(usdOut4);
+              setReceivePreview({
+                raw: amountOut,
+                decimals: outDec,
+                symbol: outSym,
+                feeAmountInTokenIn: fee,
+                burnAmountInTokenIn: 0n,
+                maxOut: amountOut,
+                roundIsActive: true,
+                whitelisted: !!(wlProof && wlProof.length),
+                userLimitUsdAfter: null, // sem after local; usamos comparação no botão
+                usdOut18
+              });
+            }
+          } catch {}
+        };
+
+
+        if (first && first !== "timeout") {
+          const q = first;
+          const outDec = typeof q.redeemInDecimals === "number"
             ? q.redeemInDecimals
-            : (redeemIn && usdc && redeemIn.toLowerCase() === usdc.toLowerCase())
-            ? usdcDecimals
-            : 18;
+            : (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase())
+              ? usdcDecimals
+              : 18;
+          const outSym = (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase()) ? "USDC" : "wONE";
+          if (!cancelled && runId === runIdRef.current) {
+            // Derive usdOut18/usdOut14 from on-chain amountOut
+            let usdOut4 = 0n, usdOut18 = 0n;
+            const amountOut = BigInt(q.amountOutRedeemToken ?? 0n);
+            const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
+            if (outIsUSDC) {
+              usdOut18 = amountOut * 10n ** 18n / 10n ** BigInt(outDec);
+            } else {
+              const { price = 0n, decimals = 18 } = await getCachedOracle();
+              if (price > 0n) {
+                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals);
+                usdOut18 = amountOut * price18 / 10n ** 18n;
+              }
+            }
+          // contrato usa USD4 -> converta
+          usdOut4 = (usdOut18 * 10_000n) / (10n ** 18n);
 
-        const outSym =
-          redeemIn && usdc && redeemIn.toLowerCase() === usdc.toLowerCase() ? "USDC" : "wONE";
+            // Prefer on-chain userLimitUsdAfter; fallback to remaining - usdOut18
+            const onChainAfter4 = q.userLimitUsdAfter != null ? BigInt(q.userLimitUsdAfter) : null;
+            const after4 = onChainAfter4 != null ? onChainAfter4
+                        : (BigInt(remaining4 ?? 0n) > usdOut4 ? (BigInt(remaining4 ?? 0n) - usdOut4) : 0n);
 
-        setReceivePreview({
-          raw: q.amountOutRedeemToken ?? 0n,
-          decimals: outDec,
-          symbol: outSym,
-          feeAmount: q.feeAmount ?? 0n,
-          feeAmountInTokenIn: q.feeAmountInTokenIn ?? 0n,
-          burnAmountInTokenIn: q.burnAmountInTokenIn ?? 0n,
-        });
+            setAmountUSD4(usdOut4);
+            setLimitUSD4(BigInt(q.userLimitUsdBefore ?? remaining4));
+            setReceivePreview({
+              raw: amountOut,
+              decimals: outDec,
+              symbol: outSym,
+              feeAmountInTokenIn: q.feeAmountInTokenIn ?? 0n,
+              burnAmountInTokenIn: q.burnAmountInTokenIn ?? 0n,
+              maxOut: amountOut,
+              roundIsActive: !!q.roundIsActive,
+              whitelisted: !!q.whitelisted,
+              userLimitUsdAfter: after4, // USD4
+              usdOut18,
+            });
+          }
+        } else {
+          await computeLocal();
+          const qLater = await chainPromise;
+          if (qLater && !cancelled && runId === runIdRef.current) {
+            const outDec = typeof qLater.redeemInDecimals === "number"
+              ? qLater.redeemInDecimals
+              : (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase())
+                ? usdcDecimals
+                : 18;
+            const outSym = (usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase()) ? "USDC" : "wONE";
+            let usdOut18 = 0n, usdOut4 = 0n;
+            const amountOut = BigInt(qLater.amountOutRedeemToken ?? 0n);
+            const outIsUSDC = usdc && redeemIn && String(usdc).toLowerCase() === String(redeemIn).toLowerCase();
+            if (outIsUSDC) {
+              usdOut18 = amountOut * 10n ** 18n / 10n ** BigInt(outDec);
+            } else {
+              const { price = 0n, decimals = 18 } = await getCachedOracle();
+              if (price > 0n) {
+                const price18 = price * 10n ** 18n / 10n ** BigInt(decimals);
+                usdOut18 = amountOut * price18 / 10n ** 18n;
+              }
+            }
+            usdOut4 = (usdOut18 * 10_000n) / (10n ** 18n);
+            const onChainAfter4 = qLater.userLimitUsdAfter != null ? BigInt(qLater.userLimitUsdAfter) : null;
+            const after4 = onChainAfter4 != null ? onChainAfter4
+                        : (BigInt(remaining4 ?? 0n) > usdOut4 ? (BigInt(remaining4 ?? 0n) - usdOut4) : 0n);
+
+
+            setAmountUSD4(usdOut4);
+            setLimitUSD4(BigInt(qLater.userLimitUsdBefore ?? remaining4));
+            setReceivePreview({
+              raw: amountOut,
+              decimals: outDec,
+              symbol: outSym,
+              feeAmountInTokenIn: qLater.feeAmountInTokenIn ?? 0n,
+              burnAmountInTokenIn: qLater.burnAmountInTokenIn ?? 0n,
+              maxOut: amountOut,
+              roundIsActive: !!qLater.roundIsActive,
+              whitelisted: !!qLater.whitelisted,
+              userLimitUsdAfter: after4,
+              usdOut18
+            });
+          }
+        }
       } catch {
-        if (alive) setReceivePreview(null);
+        if (!cancelled && runId === runIdRef.current) setReceivePreview(null);
       }
     })();
-    return () => {
-      alive = false;
-    };
-  }, [
-    readProvider,
-    address,
-    tokenIn,
-    redeemIn,
-    amountHuman,
-    selectedDecimals,
-    wlProof,
-    usdc,
-    usdcDecimals,
-  ]);
+    return () => { cancelled = true; };
+  }, [readProvider, address, tokenIn, redeemIn, debouncedAmount, selectedDecimals, wlProof, usdc, usdcDecimals, wone, getCachedOracle, uiNotice, getCachedFixedPrice, getCachedFeeTiers, getCachedUserLimit]);
 
-
-  const onMax = useCallback(() => {
+  const onMax = useCallback(async () => {
     try {
-      const human = formatUnits(selectedBalance ?? 0n, selectedDecimals ?? 18);
+      const bal = BigInt(selectedBalance ?? 0n);
+      const dec = BigInt(selectedDecimals ?? 18);
+      const remain4 = BigInt(limitUSD4 ?? 0n);
+      if (!tokenIn || remain4 <= 0n) {
+        setAmountHuman(formatUnits(bal, Number(dec)));
+        return;
+      }
+      const tokenIsUSDC = usdc && tokenIn && String(usdc).toLowerCase() === String(tokenIn).toLowerCase();
+      const tokenIsONE  = wone && tokenIn && String(wone).toLowerCase() === String(tokenIn).toLowerCase();
+      let price18 = 0n;
+      if (tokenIsUSDC) {
+        price18 = 10n ** 18n;
+      } else if (tokenIsONE) {
+        const { price = 0n, decimals = 18 } = await getCachedOracle();
+        if (price > 0n) price18 = price * 10n ** 18n / 10n ** BigInt(decimals);
+      } else {
+        const fp = await getCachedFixedPrice(tokenIn).catch(() => 0n);
+        if (fp > 0n) price18 = fp;
+      }
+      let byLimit = 0n;
+      if (price18 > 0n) {
+        const remain18 = core.toUsd18(remain4);
+        byLimit = (remain18 * 10n ** dec) / price18;
+      }
+      const maxTok = byLimit > 0n ? (bal < byLimit ? bal : byLimit) : bal;
+      const human = formatUnits(maxTok, Number(dec));
       setAmountHuman(human);
     } catch {}
-  }, [selectedBalance, selectedDecimals]);
+  }, [selectedBalance, selectedDecimals, limitUSD4, tokenIn, usdc, wone, getCachedOracle, getCachedFixedPrice]);
+
 
   const onConfirm = useCallback(async () => {
     try {
       setUiNotice(null);
       setBusy(true);
-
       if (!readProvider) throw new Error("Provider not ready");
       if (!isConnected || !address) throw new Error("Connect a wallet");
+      if (!ctxSigner) throw new Error("Connect a wallet to proceed");
+      await ensureHarmony();
       if (!tokenIn) throw new Error("Select a token");
       if (!redeemIn) throw new Error("Select wONE or USDC");
       if (!amountHuman || Number(amountHuman) <= 0) throw new Error("Enter an amount");
+      if (!isValidHuman(amountHuman)) throw new Error("Enter a valid amount");
+      if (!wlLoading && !wlOk) throw new Error(wlError || "Address not whitelisted");
 
-      // reCAPTCHA
       if (RECAPTCHA_ENABLED && recaptchaSiteKey && recaptchaRef.current) {
         let tok = null;
-        try {
-          tok = await recaptchaRef.current.executeAsync();
-        } finally {
-          recaptchaRef.current.reset();
-        }
+        try { tok = await recaptchaRef.current.executeAsync(); } finally { recaptchaRef.current.reset(); }
         if (!tok) throw new Error("reCAPTCHA validation failed");
       }
 
-      // amount do token
-      const amountIn = parseUnits(String(amountHuman), selectedDecimals);
-
-      // Guard: saldo
+      const amountIn = parseUnitsSafe(amountHuman, selectedDecimals);
+      if (amountIn == null) throw new Error("Enter a valid amount");
       if (selectedBalance != null && BigInt(amountIn) > BigInt(selectedBalance)) {
         throw new Error("Insufficient balance for selected token");
       }
 
-      // Pré-checagem fresh contra limite
-      const pre = await preflightAmountAgainstLimit(readProvider, address, tokenIn, amountHuman, selectedDecimals);
-      if (pre?.amountUSD18 != null) setAmountUSD18(pre.amountUSD18);
-      if (pre?.remainingUSD18 != null) setLimitUSD18(pre.remainingUSD18);
-      if (!pre.ok || (pre.amountUSD18 ?? 0n) >= (pre.remainingUSD18 ?? 0n)) {
-        throw new Error("Insufficient remaining daily limit");
+      const ri = await getCachedRoundInfo();
+      if (!ri?.isActive) throw new Error("Round is not active");
+
+      if (!receivePreview || receivePreview.raw === 0n) {
+        throw new Error("Quote not available");
       }
 
-      // Vault address
-      let vaultAddr = vaultService.getVaultAddress?.() || import.meta.env.VITE_VAULT_ADDRESS || "";
-      if (typeof vaultAddr !== "string" || !vaultAddr) throw new Error("Vault address not configured");
-      vaultAddr = ethers.getAddress(vaultAddr);
-
-      // Whitelist
-      if (!wlOk) throw new Error(wlError || "Address not whitelisted");
       const proof = wlProof || [];
+      await redeemSvc.approveForVaultIfNeeded(ctxSigner, tokenIn, address, amountIn);
+      const rc = await redeemSvc.redeem(ctxSigner, tokenIn, amountIn, redeemIn, proof, {});
+      setUiNotice({ type: "success", text: `Redeem confirmed in block ${rc?.blockNumber}` });
+      setAmountHuman("");
+      setReceivePreview(null);
 
-      // Approve se necessário
-      const erc = new ethers.Contract(tokenIn, ERC20_MINI, readProvider);
-      const allowance = await erc.allowance(address, vaultAddr);
-      if (allowance < amountIn) {
-        const signerA = await ctxProvider?.getSigner?.();
-        if (!signerA) throw new Error("Connect a wallet to approve");
-        const txA = await erc.connect(signerA).approve(vaultAddr, amountIn);
-        await txA.wait();
-      }
+      try {
+        userLimitCacheRef.current = { ts: 0, value: null };
+        const { remainingUSD } = await getCachedUserLimit(address); // USD4
+        setLimitUSD4(BigInt(remainingUSD ?? 0n));
+        setAmountUSD4(0n);
+        oracleCacheRef.current = { ts: 0, value: null };
+        roundCacheRef.current = { ts: 0, value: null };
+        const ri2 = await getCachedRoundInfo();
+        setRoundActive(!!ri2?.isActive);
+      } catch {}
 
-      // Envio
-      const signer = await ctxProvider?.getSigner?.();
-      if (!signer) throw new Error("Connect a wallet to proceed");
-
-      let lastReason = "";
-      for (const sig of FN_REDEEM_CANDIDATES) {
-        let args;
-        switch (sig) {
-          case "redeem(address,uint256,address,bytes32[])":
-            args = [tokenIn, amountIn, redeemIn, proof];
-            break;
-          default:
-            continue;
-        }
-
-        // simulate-first
-        const sim = await vaultService.preflightRedeem(readProvider, {
-          fn: sig,
-          args,
-          context: { user: address, tokenIn, amountIn, redeemIn, proof },
-        });
-
-        if (!sim.ok) {
-          lastReason = sim.reason || "";
-          continue;
-        }
-
-        // send
-        const sent = await vaultService.submitRedeem(signer, { fn: sig, args });
-        if (!sent.ok) {
-          if (sent.rejected) {
-            setUiNotice({ type: "warning", text: "Transaction rejected by user" });
-            return;
+      try {
+        if (readProvider && address && supportedTokens.length > 0) {
+          let refreshed = null;
+          if (typeof core.batchBalances === "function") {
+            try {
+              const map = await core.batchBalances(readProvider, address, supportedTokens);
+              if (map && typeof map === 'object') {
+                refreshed = Object.entries(map).map(([addr, info]) => [String(addr).toLowerCase(), info]);
+              }
+            } catch {}
           }
-          lastReason = sent.reason || "";
-          continue;
-        }
-
-        setUiNotice({ type: "success", text: `Redeem submitted. Tx: ${sent.tx.hash}` });
-        await sent.tx.wait();
-        setUiNotice({ type: "success", text: "Redeem confirmed." });
-        setAmountHuman("");
-
-        // refresh balances
-        try {
-          if (readProvider && address && supportedTokens.length > 0) {
-            const refreshed = await Promise.all(
+          if (!refreshed) {
+            refreshed = await Promise.all(
               supportedTokens.map(async (addr) => {
                 try {
-                  const erc2 = new ethers.Contract(addr, ERC20_MINI, readProvider);
-                  const [dec, sym, bal] = await Promise.all([
-                    erc2.decimals(),
-                    erc2.symbol().catch(() => "TOKEN"),
-                    erc2.balanceOf(address).catch(() => 0n),
-                  ]);
-                  return [addr.toLowerCase(), { raw: bal ?? 0n, decimals: Number(dec) || 18, symbol: String(sym || "TOKEN") }];
+                  const meta = await getTokenMetaCached(readProvider, addr);
+                  const erc2 = new Contract(addr, ERC20_MINI, readProvider);
+                  const bal = await erc2.balanceOf(address).catch(() => 0n);
+                  return [String(addr).toLowerCase(), { raw: bal ?? 0n, decimals: meta.decimals, symbol: meta.symbol }];
                 } catch {
-                  return [addr.toLowerCase(), { raw: 0n, decimals: 18, symbol: "TOKEN" }];
+                  return [String(addr).toLowerCase(), { raw: 0n, decimals: 18, symbol: "TOKEN" }];
                 }
               })
             );
-            setBalances(new Map(refreshed));
           }
-        } catch {}
-        return;
-      }
-
-      setUiNotice({ type: "error", text: friendlySimError(lastReason || "Redeem failed") });
+          setBalances(new Map(refreshed));
+        }
+      } catch {}
     } catch (e) {
-      setUiNotice({ type: "error", text: friendlySimError(e?.shortMessage || e?.reason || e?.message || String(e)) });
+      setUiNotice({ type: "error", text: rpcFriendly(e) });
     } finally {
       setBusy(false);
     }
-  }, [
-    readProvider,
-    ctxProvider,
-    isConnected,
-    address,
-    tokenIn,
-    redeemIn,
-    amountHuman,
-    recaptchaSiteKey,
-    selectedDecimals,
-    supportedTokens,
-    selectedBalance,
-    wlOk,
-    wlError,
-    wlProof,
-  ]);
+  }, [readProvider, ctxSigner, isConnected, address, tokenIn, redeemIn, amountHuman, selectedDecimals, selectedBalance, wlOk, wlError, wlLoading, wlProof, supportedTokens, receivePreview, getCachedRoundInfo, isValidHuman, parseUnitsSafe, getCachedUserLimit]);
 
   const hasWone = (vaultBalances?.woneBalance ?? 0n) > 0n;
   const hasUsdc = (vaultBalances?.usdcBalance ?? 0n) > 0n;
 
   const confirmDisabled = useMemo(() => {
     if (busy) return true;
-    if (!isConnected || !address || !tokenIn || !redeemIn) return true;
-    if (!amountHuman || Number(amountHuman) <= 0) return true;
+    if (!isConnected || !address || !ctxSigner || !tokenIn || !redeemIn) return true;
+    if (!debouncedAmount || Number(debouncedAmount) <= 0) return true;
+    if (!isValidHuman(debouncedAmount)) return true;
     if (!wlLoading && !wlOk) return true;
-    // usa >= para alinhar com o contrato/rounding
-    if (amountUSD18 !== 0n && limitUSD18 !== 0n && amountUSD18 >= limitUSD18) return true;
+    if (!roundActive) return true;
+    if (!receivePreview || receivePreview.raw === 0n) return true;
+    if (receivePreview?.userLimitUsdAfter != null) {
+      if (BigInt(receivePreview.userLimitUsdAfter) <= 0n) return true;
+    } else {
+      if (amountUSD4 === 0n) return true;
+      if (limitUSD4 !== 0n && amountUSD4 > limitUSD4) return true;
+    }
     return false;
-  }, [busy, isConnected, address, tokenIn, redeemIn, amountHuman, wlLoading, wlOk, amountUSD18, limitUSD18]);
+  }, [busy, isConnected, address, ctxSigner, tokenIn, redeemIn, debouncedAmount, wlLoading, wlOk, amountUSD4, limitUSD4, receivePreview, isValidHuman, roundActive]);
 
   const isLoading = loadingBase || loadingBalances;
+  const bootBusy = loadingBase || loadingBalances || wlLoading;
+  const pendingSteps = (loadingBase ? 1 : 0) + (loadingBalances ? 1 : 0) + (wlLoading ? 1 : 0);
+  const totalStepsDynamic = bootStepsDone + pendingSteps;
+  const bootProgress = totalStepsDynamic > 0 ? Math.min(100, Math.round((bootStepsDone / totalStepsDynamic) * 100)) : null;
 
   return (
     <div className={styles.contractRedeemCard}>
-      {/* PRELOAD CONSOLE */}
+      {/*}
       <LoadConsole
         open={bootOpen && (bootBusy || bootLogs.length > 0)}
         title="Preparing Vault"
@@ -538,184 +762,84 @@ export default function RedeemForm({ address: addressProp }) {
         busy={bootBusy}
         progress={bootBusy ? bootProgress : null}
         onClose={() => setBootOpen(false)}
-        
-      />
+      /> */}
       <div className={styles.contractRedeemHeader}>
         <h3 className={styles.h3} style={{ margin: 0 }}>Redeem</h3>
       </div>
-
       {isLoading && (
         <div className={`${styles.alert} ${styles.info}`} style={{ marginBottom: 12 }}>
           Loading vault data{loadingBalances ? " & balances" : ""}…
         </div>
       )}
-
       {uiNotice && (
-        <div
-          className={`${styles.alert} ${
-            uiNotice.type === "error"
-              ? styles.error
-              : uiNotice.type === "warning"
-              ? styles.warning
-              : uiNotice.type === "success"
-              ? styles.success
-              : styles.info
-          }`}
-        >
-          {uiNotice.text}
-        </div>
+        <div className={`${styles.alert} ${uiNotice.type === "error" ? styles.error : uiNotice.type === "warning" ? styles.warning : uiNotice.type === "success" ? styles.success : styles.info}`}>{uiNotice.text}</div>
       )}
-
       {!wlLoading && !wlOk && (
         <div className={`${styles.alert} ${styles.warning}`} style={{ marginBottom: 12 }}>
           {wlError || "Address not whitelisted"}
         </div>
       )}
-
       <div className={styles.grid2}>
-        {/* Token In */}
         <div className={styles.field}>
           <label className={styles.smallMuted}>Token In</label>
-          <TokenSelect
-            tokens={supportedTokens}
-            value={tokenIn}
-            onChange={setTokenIn}
-            placeholder="Select token to redeem"
-          />
+          <TokenSelect tokens={supportedTokens} value={tokenIn} onChange={setTokenIn} placeholder="Select token to redeem" />
           {!!tokenIn && selected && (
-            <div className={styles.smallMuted}>
-              Balance: {formatUnits(selectedBalance, selectedDecimals)} {selectedSymbol}
-            </div>
+            <div className={styles.smallMuted}>Balance: {formatUnits(selectedBalance, selectedDecimals)} {selectedSymbol}</div>
           )}
         </div>
-
-        {/* Receive In */}
         <div className={styles.field}>
           <label className={styles.smallMuted}>Receive In</label>
           <div className={styles.row}>
             {wone && (
-              <button
-                type="button"
-                className={`${styles.button} ${redeemIn === wone ? styles.buttonActive : ""}`}
-                onClick={() => setRedeemIn(wone)}
-                disabled={!hasWone}
-                title={!hasWone ? "Vault has no wONE available" : undefined}
-              >
-                wONE
-              </button>
+              <button type="button" className={`${styles.button} ${redeemIn === wone ? styles.buttonActive : ""}`} onClick={() => setRedeemIn(wone)} disabled={!hasWone} title={!hasWone ? "Vault has no wONE available" : undefined}>wONE</button>
             )}
             {usdc && (
-              <button
-                type="button"
-                className={`${styles.button} ${redeemIn === usdc ? styles.buttonActive : ""}`}
-                onClick={() => setRedeemIn(usdc)}
-                disabled={!hasUsdc}
-                title={!hasUsdc ? "Vault has no USDC available" : undefined}
-              >
-                USDC
-              </button>
+              <button type="button" className={`${styles.button} ${redeemIn === usdc ? styles.buttonActive : ""}`} onClick={() => setRedeemIn(usdc)} disabled={!hasUsdc} title={!hasUsdc ? "Vault has no USDC available" : undefined}>USDC</button>
             )}
             {!hasWone && !hasUsdc && <span className={styles.smallMuted}>Vault has no funds available.</span>}
           </div>
         </div>
       </div>
-
-      {/* Amount & Max */}
-      <div className={styles.field}>
-        <label className={styles.smallMuted}>Amount</label>
-        <div className={styles.row}>
-          <input
-            className={styles.input}
-            type="number"
-            min={0}
-            step="any"
-            inputMode="decimal"
-            placeholder="e.g. 100"
-            value={amountHuman}
-            onChange={(e) => setAmountHuman(e.target.value)}
-            disabled={busy}
-          />
-          <button
-            type="button"
-            className={styles.button}
-            onClick={onMax}
-            disabled={!isConnected || !address || !tokenIn || busy}
-          >
-            Max
-          </button>
+      <div className={styles.contractRedeemField}>
+        
+        <label className={styles.contractRedeemMuted}>Amount</label>
+        <div className={styles.contractRedeemRow}>
+          <input className={styles.input} type="text" inputMode="decimal" placeholder="e.g. 100" value={amountHuman} onChange={(e) => setAmountHuman(e.target.value)} disabled={busy} />
+          <button type="button" className={styles.button} onClick={onMax} disabled={!isConnected || !address || !tokenIn || busy}>Max</button>
         </div>
       </div>
-
-      {/* Action */}
-      <div className={styles.contractRedeemRow}>
-      <button
-        type="button"
-        className={`${styles.button} ${styles.buttonConfirm} ${styles.buttonAccent} ${confirmDisabled ? styles.buttonDisabled : ""}`}
-        onClick={onConfirm}
-        disabled={confirmDisabled}
-      >
-        {busy ? "Processing…" : "Confirm"}
-      </button>
+      <div className={styles.contractRedeemButtonRow}>
+        <button type="button" className={`${styles.button} ${styles.buttonConfirm} ${styles.buttonAccent} ${confirmDisabled ? styles.buttonDisabled : ""}`} onClick={onConfirm} disabled={confirmDisabled}>{busy ? "Processing…" : "Confirm"}</button>
       </div>
-
-
-      {/* Operation Preview Expanded */}
-      {receivePreview && receivePreview.raw > 0n && (
-        <div className={styles.contractRedeemCardInner}>
-          <h4 className={styles.contractRedeemTitle}>Operation preview</h4>
-
-          <div className={styles.contractRedeemRow}>
+      {receivePreview && (
+        <div className={styles.contractRedeemPreview}>
+          <div className={styles.contractRedeemPreviewRow}>
             <span className={styles.contractRedeemLabel}>Will receive</span>
-            <span className={styles.contractRedeemValue}>
-              {formatUnits(receivePreview.raw, receivePreview.decimals)} {receivePreview.symbol}
-            </span>
+            <span className={styles.contractRedeemValue}>{formatUnitsFixed(receivePreview.raw, receivePreview.decimals, 2)} {receivePreview.symbol}</span>
           </div>
-
-          <div className={styles.contractRedeemRow}>
+          <div className={styles.contractRedeemPreviewRow}>
             <span className={styles.contractRedeemLabel}>Fee amount</span>
-            <span className={styles.contractRedeemValue}>
-              {formatUnits(receivePreview.feeAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}
-            </span>
+            <span className={styles.contractRedeemValue}>{formatUnits(receivePreview.feeAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}</span>
           </div>
-
-          <div className={styles.contractRedeemRow}>
+          <div className={styles.contractRedeemPreviewRow}>
             <span className={styles.contractRedeemLabel}>Max receive</span>
-            <span className={styles.contractRedeemValue}>
-              {formatUnits(receivePreview.maxOut ?? receivePreview.raw, receivePreview.decimals)} {receivePreview.symbol}
-            </span>
+            <span className={styles.contractRedeemValue}>{formatUnitsFixed(receivePreview.maxOut ?? receivePreview.raw, receivePreview.decimals, 2)} {receivePreview.symbol}</span>
           </div>
-
           {!!fixedPriceText && (
-            <div className={styles.contractRedeemRow}>
+            <div className={styles.contractRedeemPreviewRow}>
               <span className={styles.contractRedeemLabel}>Fixed price</span>
-              <span className={styles.contractRedeemValue}>{fixedPriceText} USD</span>
+              <span className={styles.contractRedeemValue}>{fixedPriceText}</span>
             </div>
           )}
 
-          <div className={styles.contractRedeemRow}>
-            <span className={styles.contractRedeemLabel}>Daily limit after</span>
-            <span className={styles.contractRedeemValue}>
-              {(() => {
-                const rem = limitUSD18 ?? 0n;
-                const amt = amountUSD18 ?? 0n;
-                const after = rem > amt ? (rem - amt) : 0n;
-                return `$${Number(formatUnits(after, 18)).toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
-              })()}
-            </span>
-          </div>
-
-          <div className={styles.contractRedeemRow}>
-            <span className={styles.contractRedeemLabel}>Amount burned</span>
-            <span className={styles.contractRedeemValue}>
-              {formatUnits(receivePreview.burnAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}
-            </span>
-          </div>
+          {(receivePreview.burnAmountInTokenIn ?? 0n) > 0n && (
+            <div className={styles.contractRedeemPreviewRow}>
+              <span className={styles.contractRedeemLabel}>Amount burned</span>
+              <span className={styles.contractRedeemValue}>{formatUnits(receivePreview.burnAmountInTokenIn ?? 0n, selectedDecimals)} {selectedSymbol}</span>
+            </div>
+          )}
         </div>
       )}
-
-
-
-      {/* Invisible reCAPTCHA */}
       {RECAPTCHA_ENABLED && recaptchaSiteKey && <ReCAPTCHA ref={recaptchaRef} size="invisible" sitekey={recaptchaSiteKey} />}
     </div>
   );

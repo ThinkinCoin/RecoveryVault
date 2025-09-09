@@ -23,6 +23,41 @@
     <title>Recovery Vault</title>
   </head>
   <body>
+    <script>
+    (function () {
+      function showOverlay(msg) {
+        var el = document.getElementById('__panic_overlay__');
+        if (!el) {
+          el = document.createElement('div');
+          el.id = '__panic_overlay__';
+          el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);color:#fff;z-index:999999;padding:16px;overflow:auto;font:14px/1.4 ui-monospace,Menlo,monospace';
+          document.body.appendChild(el);
+        }
+        var p = document.createElement('pre');
+        p.textContent = '[Crash] ' + new Date().toISOString() + '\n' + msg + '\n';
+        el.appendChild(p);
+      }
+
+      window.addEventListener('error', function (e) {
+        var m = (e && (e.message || e.error && e.error.stack)) || String(e);
+        showOverlay(m);
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e && e.reason;
+        var m = (r && (r.stack || r.message)) || JSON.stringify(r);
+        showOverlay('Unhandled Rejection: ' + m);
+      });
+
+      // Diagnóstico rápido de ambiente
+      if (typeof BigInt === 'undefined') {
+        showOverlay('Este navegador NÃO suporta BigInt. iOS < 14/Safari antigo causam tela branca.');
+      }
+      if (!('crypto' in globalThis && crypto.getRandomValues)) {
+        showOverlay('crypto.getRandomValues ausente — alguns módulos (ethers) podem falhar.');
+      }
+    })();
+    </script>
+
     <noscript>Enable JavaScript to use this application.</noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>

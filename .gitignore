@@ -7,3 +7,10 @@ node_modules
 .env.prod
 .env.secret
 cache
+scripts
+contracts
+hardhat.config.js
+vite.config.js
+vitest.config.js
+dist
+public/data/*.txt

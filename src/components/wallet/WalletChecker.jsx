@@ -1,13 +1,14 @@
 // src/components/wallet/WalletChecker.jsx
-// Checks if the connected wallet is whitelisted using helpers/proof.
-// Keeps same UI/props; avoids format/path drift for proofs.
-
+// Checks if the connected wallet is whitelisted usando o whitelistService (single-flight).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "@/styles/Global.module.css";
-import { TfiReload } from "react-icons/tfi";
 import { FiCheck, FiX } from "react-icons/fi";
 import LimitChecker from "@/components/wallet/LimitChecker";
-import { preloadProofs, getProofFor } from "@/helpers/proof";
+
+// ✅ mesma fonte/caches do serviço
+import { useWhitelist, preloadProofs, isZeroRoot } from "@/services/whitelistService";
+import * as core from "@/services/vaultCore";
+import { useContractContext } from "@/contexts/ContractContext";
 
 /** Lightweight hook to read currently connected account (no connect prompt) */
 function useConnectedAddress() {
@@ -50,73 +51,65 @@ const shorten = (addr) => (addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : ""
 
 /**
  * Props:
- * - address?: string  (optional fixed address, otherwise uses connected)
- * - proofsUrl?: string (IGNORED now; use VITE_PROOF_BASE_PATH env when needed)
+ * - address?: string
  * - compact?: boolean
  * - onResult?: ({address, eligible, proof?: string[]}) => void
  * - className?: string
  */
-export default function WalletChecker({ address, proofsUrl = "/data/proofs.json", compact = false, onResult, className }) {
+export default function WalletChecker({ address, compact = false, onResult, className }) {
   const connected = useConnectedAddress();
   const effectiveAddress = useMemo(() => (address || connected || null), [address, connected]);
 
-  const [status, setStatus] = useState("idle"); // idle | checking | success | denied | error
-  const [error, setError] = useState("");
-  const [proof, setProof] = useState(/** @type {string[]|null} */(null));
-  const mountedRef = useRef(true);
+  // provider compartilhado com o app (e fallback para default RPC)
+  const { provider: ctxProvider } = useContractContext();
+  const readProvider = useMemo(() => ctxProvider || core.getDefaultProvider?.(), [ctxProvider]);
 
-  // stable onResult publisher with de-dupe
+  // usa a mesma lógica/caches do whitelistService
+  const { loading, ok: eligible, proof, error, chainRoot } = useWhitelist(effectiveAddress, readProvider);
+
+  // whitelist on/off derivado do root on-chain
+  const whitelistOn = !!chainRoot && !isZeroRoot(chainRoot);
+
+  // preload opcional (idempotente, single-flight)
+  useEffect(() => { preloadProofs().catch(() => {}); }, []);
+
+  // publicar resultado para o pai (de-dupe)
   const onResultRef = useRef(onResult);
   useEffect(() => { onResultRef.current = onResult; }, [onResult]);
   const lastRef = useRef({ addr: null, eligible: null });
-
-  const publish = useCallback((eligible, proofVal) => {
-    if (lastRef.current.addr === effectiveAddress && lastRef.current.eligible === eligible) return;
-    lastRef.current = { addr: effectiveAddress, eligible };
-    onResultRef.current?.({ address: effectiveAddress, eligible, proof: proofVal || undefined });
-    console.info("[WalletChecker] Wallet", eligible ? "is eligible:" : "is not eligible:", effectiveAddress);
+  const publish = useCallback((eligibleVal, proofVal) => {
+    if (lastRef.current.addr === effectiveAddress && lastRef.current.eligible === eligibleVal) return;
+    lastRef.current = { addr: effectiveAddress, eligible: eligibleVal };
+    onResultRef.current?.({ address: effectiveAddress, eligible: eligibleVal, proof: proofVal || undefined });
+    console.info("[WalletChecker] Wallet", eligibleVal ? "is eligible:" : "is not eligible:", effectiveAddress);
   }, [effectiveAddress]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
+    if (!effectiveAddress || !readProvider) return;
+    if (loading) return;
 
-  const verify = useCallback(async () => {
-    if (!effectiveAddress) {
-      setStatus("idle");
-      setProof(null);
+    // Se whitelist está desativada on-chain, não publicar elegível
+    if (!whitelistOn) {
+      publish(false);
       return;
     }
-    setStatus("checking");
-    setError("");
-    setProof(null);
 
-    try {
-      // Load proofs from helpers (supports public/data, root public, or @/ui)
-      await preloadProofs();
-      const p = await getProofFor(effectiveAddress); // bytes32[]
-      if (!mountedRef.current) return;
+    if (eligible) publish(true, proof);
+    else publish(false);
+  }, [effectiveAddress, readProvider, loading, eligible, proof, publish, whitelistOn]);
 
-      if (Array.isArray(p) && p.length > 0) {
-        setStatus("success");
-        setProof(p);
-        publish(true, p);
-      } else {
-        setStatus("denied");
-        publish(false);
-      }
-    } catch (err) {
-      console.error("[WalletChecker] Verification error:", err);
-      if (!mountedRef.current) return;
-      setStatus("error");
-      setError(err?.message || "Unknown error");
-      publish(false);
-    }
-  }, [effectiveAddress, publish]);
-
-  // Auto-verify whenever the effective address changes
-  useEffect(() => { verify(); }, [verify]);
+  // status derivado para UI
+  const status = !effectiveAddress
+    ? "idle"
+    : loading
+      ? "checking"
+      : !whitelistOn
+        ? "off"
+        : eligible
+          ? "success"
+          : error
+            ? "denied"
+            : "denied";
 
   const badgeStyle = useMemo(() => ({
     display: "inline-flex",
@@ -139,6 +132,13 @@ export default function WalletChecker({ address, proofsUrl = "/data/proofs.json"
         </div>
       );
     }
+    if (status === "off") {
+      return (
+        <div style={{ ...badgeStyle, color: "#8c6d1f" }} data-testid="wallet-status-off" aria-live="polite">
+          <FiX style={{ marginRight: 8 }} /> Whitelist is disabled on-chain <span style={{ opacity: 0.7 }}>({shorten(effectiveAddress)})</span>
+        </div>
+      );
+    }
     if (status === "success") {
       return (
         <div style={{ ...badgeStyle, color: "#0a7f55" }} data-testid="wallet-status-success" aria-live="polite">
@@ -149,14 +149,7 @@ export default function WalletChecker({ address, proofsUrl = "/data/proofs.json"
     if (status === "denied") {
       return (
         <div style={{ ...badgeStyle, color: "#c0392b" }} data-testid="wallet-status-denied" aria-live="polite">
-          <FiX style={{ marginRight: 8 }} /> Denied <span style={{ opacity: 0.7 }}>({shorten(effectiveAddress)})is not prehacked.</span>
-        </div>
-      );
-    }
-    if (status === "error") {
-      return (
-        <div style={{ ...badgeStyle, color: "#8c6d1f" }} data-testid="wallet-status-error" aria-live="polite">
-          <FiX style={{ marginRight: 8 }} /> Error <span style={{ opacity: 0.7 }}>({error})</span>
+          <FiX style={{ marginRight: 8 }} /> Denied <span style={{ opacity: 0.7 }}>({shorten(effectiveAddress)}) is not prehacked{error ? `: ${error}` : ""}.</span>
         </div>
       );
     }
@@ -164,37 +157,24 @@ export default function WalletChecker({ address, proofsUrl = "/data/proofs.json"
   }, [effectiveAddress, status, error, badgeStyle]);
 
   return (
-    <div className={`${styles.contractLimitsCard}  ${className || ""}`}>
-      <LimitChecker address={address} />
+    <div className={`${styles.contractLimitsCard} ${className || ""}`}>
+      {/* use o mesmo endereço efetivo do checker */}
+      <LimitChecker address={effectiveAddress} />
       {ui}
-
-      {/* Optional proof details (hidden unless available) */}
+      {/* Opcional: detalhes da prova */}
       {/* {status === "success" && <pre className={styles.smallMuted}>{JSON.stringify(proof, null, 2)}</pre>} */}
-
-      {/* Manual re-check (left commented; enable if you want a refresh button)
-      <div style={{ marginTop: 6 }}>
-        <button
-          type="button"
-          onClick={verify}
-          className={`${styles.button}`}
-          title="Re-check eligibility"
-        >
-          <TfiReload size={12} />
-        </button>
-      </div>
-      */}
     </div>
   );
 }
 
-// Utility: programmatic check (now uses helpers/proof)
-export async function isWalletEligible(address) {
-  if (!address) return { eligible: false };
+// Utilidade programática usando a mesma fonte (agora precisa do provider)
+export async function isWalletEligible(address, provider) {
+  if (!address || !provider) return { eligible: false, error: "address/provider missing" };
   try {
     await preloadProofs();
-    const p = await getProofFor(address);
-    const eligible = Array.isArray(p) && p.length > 0;
-    return { eligible, proof: eligible ? p : undefined };
+    // use o mesmo serviço para validar (inclui verificação de merkle e root zero)
+    const { ok, proof, chainRoot, fileRoot, rootMismatch, reason } = await (await import("@/services/whitelistService")).checkWhitelist(provider, address);
+    return { eligible: !!ok, proof, chainRoot, fileRoot, rootMismatch, reason };
   } catch (err) {
     console.error("[WalletChecker] isWalletEligible error:", err);
     return { eligible: false, error: err?.message || "Unknown error" };
