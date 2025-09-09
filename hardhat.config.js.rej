@@ -1,0 +1,59 @@
+--- hardhat.config.js
++++ hardhat.config.js
+@@ -1 +1 @@
+-require('@nomicfoundation/hardhat-toolbox');
++require("@nomicfoundation/hardhat-toolbox");
+@@ -2 +2 @@
+-require('@nomicfoundation/hardhat-verify');
++require("@nomicfoundation/hardhat-verify");
+@@ -16 +16 @@
+-  defaultNetwork: 'hardhat',
++
+@@ -19 +19 @@
+-    version: '0.8.18',
++    version: "0.8.18",
+@@ -32 +32 @@
+-    networks: {
++  networks: {
+@@ -33 +33 @@
+-      hardhat: {},
++    hardhat: {},
+@@ -34 +34 @@
+-      harmony: {
++    harmony: {
+@@ -35 +35 @@
+-        url: process.env.VITE_RPC_URL || '',
++      url: process.env.VITE_RPC_URL || "",
+@@ -36 +36 @@
+-        accounts: privateKey ? [`0x${privateKey}`] : [],
++      accounts: privateKey ? [`0x${privateKey}`] : [],
+@@ -37 +37 @@
+-        gasPrice: 1_000_000_000, // 1 gwei
++      gasPrice: 1_000_000_000, // 1 gwei
+@@ -38 +38 @@
+-      }
++    },
+@@ -41 +41 @@
+-    etherscan: {
++  etherscan: {
+@@ -42 +42 @@
+-      apiKey: {
++    apiKey: {
+@@ -45 +45 @@
+-      customChains: [
++    customChains: [
+@@ -46 +46 @@
+-        {
++      {
+@@ -48 +48 @@
+-          chainId: 1666600000,
++        chainId: 1666600000,
+@@ -49 +49 @@
+-          urls: {
++        urls: {
+@@ -50 +50 @@
+-            apiURL: 'https://explorer.harmony.one/api',
++          apiURL: "https://explorer.harmony.one/api",
+@@ -59 +59 @@
+-      target: 'ethers-v6'
++    target: "ethers-v6",

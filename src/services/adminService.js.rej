@@ -1,0 +1,32 @@
+--- services/adminService.js
++++ services/adminService.js
+@@ -3 +3 @@
+-import { getWriteContract, getReadContract  } from "@/services/vaultCore";
++import { getWriteContract, getReadContract } from "@/services/vaultCore";
+@@ -15 +15 @@
+-    type: "function"
++    type: "function",
+@@ -16 +16 @@
+-  }
++  },
+@@ -73 +73 @@
+-    dec   = r?.decimals ?? (Array.isArray(r) ? r[1] : undefined);
++    dec = r?.decimals ?? (Array.isArray(r) ? r[1] : undefined);
+@@ -90 +90 @@
+-      to: contract.target,         // ethers v6
++      to: contract.target, // ethers v6
+@@ -91 +91 @@
+-      data
++      data,
+@@ -102 +102 @@
+-export async function setDailyLimit(signer, amountLike){
++export async function setDailyLimit(signer, amountLike) {
+@@ -119 +119 @@
+-export async function setDevWallet(signer, wallet){
++export async function setDevWallet(signer, wallet) {
+@@ -131 +131 @@
+-export async function setFixedUsdPrice(signer, token, usdPrice18){
++export async function setFixedUsdPrice(signer, token, usdPrice18) {
+@@ -159 +159 @@
+-export async function setRmcWallet(signer, wallet){
++export async function setRmcWallet(signer, wallet) {

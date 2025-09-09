@@ -1,0 +1,29 @@
+--- src/services/txUtils.js
++++ src/services/txUtils.js
+@@ -3 +3 @@
+-import { Interface, isHexString  } from "ethers";
++import { Interface, isHexString } from "ethers";
+@@ -23 +23 @@
+-    try {
++  try {
+@@ -24 +24 @@
+-      const raw = import.meta?.env?.VITE_GAS_LIMIT;
++    const raw = import.meta?.env?.VITE_GAS_LIMIT;
+@@ -25 +25 @@
+-      const v = BigInt(raw);
++    const v = BigInt(raw);
+@@ -26 +26 @@
+-      return v > 0n ? v : 5_000_000n;
++    return v > 0n ? v : 5_000_000n;
+@@ -28 +28 @@
+-  })();
++})();
+@@ -33 +33 @@
+-      const raw = import.meta?.env?.VITE_GAS_PRICE_GWEI;
++    const raw = import.meta?.env?.VITE_GAS_PRICE_GWEI;
+@@ -34 +34 @@
+-      const v = parseDecimalToBigInt(raw, 9); // gwei â wei
++    const v = parseDecimalToBigInt(raw, 9); // gwei â wei
+@@ -35 +35 @@
+-      return (v != null && v > 0n) ? v : null;
++    return v != null && v > 0n ? v : null;

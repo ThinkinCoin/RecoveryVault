@@ -1,0 +1,5 @@
+--- src/pages/Recovery.jsx
++++ src/pages/Recovery.jsx
+@@ -125 +125 @@
+-  }, [account, readProvider, appkitAccount?.address]);
++  }, [account, readProvider, appkitAccount.address, appkitAccount]);

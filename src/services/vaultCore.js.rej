@@ -1,0 +1,17 @@
+--- src/services/vaultCore.js
++++ src/services/vaultCore.js
+@@ -11 +11 @@
+-  "function approve(address spender, uint256 amount) returns (bool)"
++  "function approve(address spender, uint256 amount) returns (bool)",
+@@ -15 +15 @@
+-export const USD_SCALE_BI = 10_000n;     // 1e4 (USD4)
++export const USD_SCALE_BI = 10_000n; // 1e4 (USD4)
+@@ -16 +16 @@
+-export const USD_1e18_BI  = 10n ** 18n;  // 1e18 (USD18)
++export const USD_1e18_BI = 10n ** 18n; // 1e18 (USD18)
+@@ -29 +29 @@
+-export async function setDailyLimitUsd18(signer, usd18BigInt){
++export async function setDailyLimitUsd18(signer, usd18BigInt) {
+@@ -41 +41 @@
+-  const url = import.meta.env.VITE_RPC_URL;          // ex.: https://api.harmony.one
++  const url = import.meta.env.VITE_RPC_URL; // ex.: https://api.harmony.one

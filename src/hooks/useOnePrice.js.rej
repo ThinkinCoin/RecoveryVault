@@ -1,0 +1,5 @@
+--- src/hooks/useOnePrice.js
++++ src/hooks/useOnePrice.js
+@@ -20 +20 @@
+-  const [price, setPrice] = useState(/** @type {number|null} */(null));
++  const [price, setPrice] = useState(/** @type {number|null} */ (null));

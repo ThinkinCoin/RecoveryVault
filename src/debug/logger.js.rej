@@ -1,0 +1,8 @@
+--- src/debug/logger.js
++++ src/debug/logger.js
+@@ -16 +16 @@
+-export const log  = (m) => emit("info", m);
++export const log = (m) => emit("info", m);
+@@ -19 +19 @@
+-export const error= (m) => emit("error", m);
++export const error = (m) => emit("error", m);

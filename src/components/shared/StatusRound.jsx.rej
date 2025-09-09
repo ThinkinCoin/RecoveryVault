@@ -1,0 +1,8 @@
+--- src/components/shared/StatusRound.jsx
++++ src/components/shared/StatusRound.jsx
+@@ -108 +108 @@
+-    const hasFunds = (w > 0n) || (u > 0n);
++    const hasFunds = w > 0n || u > 0n;
+@@ -164 +164 @@
+-          
++          </div>

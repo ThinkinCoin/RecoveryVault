@@ -1,0 +1,41 @@
+--- helpers/proof.js
++++ helpers/proof.js
+@@ -28 +28 @@
+-async function fetchFirstOk(urls){
++async function fetchFirstOk(urls) {
+@@ -29 +29 @@
+-  for (const u of urls){
++  for (const u of urls) {
+@@ -40 +40 @@
+-function toBytes32Array(arr){
++function toBytes32Array(arr) {
+@@ -43 +43 @@
+-  for (const v of arr){
++  for (const v of arr) {
+@@ -55 +55 @@
+-async function loadOnce(){
++async function loadOnce() {
+@@ -60 +60 @@
+-  if (proofsJson && typeof proofsJson === "object"){
++  if (proofsJson && typeof proofsJson === "object") {
+@@ -65 +65 @@
+-    if (proofsJson.proofs && typeof proofsJson.proofs === "object"){
++    if (proofsJson.proofs && typeof proofsJson.proofs === "object") {
+@@ -74 +74 @@
+-    for (const [addr, proofArr] of Object.entries(mapRaw)){
++    for (const [addr, proofArr] of Object.entries(mapRaw)) {
+@@ -81 +81 @@
+-  if (!CACHE.merkleRoot){
++  if (!CACHE.merkleRoot) {
+@@ -83 +83 @@
+-    if (rootJson && typeof rootJson.merkleRoot === "string"){
++    if (rootJson && typeof rootJson.merkleRoot === "string") {
+@@ -97 +97 @@
+-export async function preloadProofs(){
++export async function preloadProofs() {
+@@ -105 +105 @@
+-export async function getMerkleRoot(){
++export async function getMerkleRoot() {
+@@ -115 +115 @@
+-export async function getProofFor(address){
++export async function getProofFor(address) {

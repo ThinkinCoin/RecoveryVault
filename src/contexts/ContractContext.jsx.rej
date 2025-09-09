@@ -1,0 +1,32 @@
+--- contexts/ContractContext.jsx
++++ contexts/ContractContext.jsx
+@@ -11 +11 @@
+-  useRef
++  useRef,
+@@ -76 +76 @@
+-  disconnect: async () => {}
++  disconnect: async () => {},
+@@ -129 +129 @@
+-    clearBuildTimer();
++      clearBuildTimer();
+@@ -130 +130 @@
+-    buildTimerRef.current = setTimeout(async () => {
++      buildTimerRef.current = setTimeout(async () => {
+@@ -131 +131 @@
+-      try {
++        try {
+@@ -132 +132 @@
+-        if (unmountedRef.current) return;
++          if (unmountedRef.current) return;
+@@ -133 +133 @@
+-        const s = await buildSigner(prov);
++          const s = await buildSigner(prov);
+@@ -135 +135 @@
+-      } catch (e) {
++        } catch (e) {
+@@ -137 +137 @@
+-        if (!unmountedRef.current) setSigner(null);
++          if (!unmountedRef.current) setSigner(null);
+@@ -139 +139 @@
+-    }, Math.max(0, Number(delayMs) || 0));
++      }, Math.max(0, Number(delayMs) || 0));

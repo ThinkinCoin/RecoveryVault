@@ -1,0 +1,20 @@
+--- src/services/whitelistService.js
++++ src/services/whitelistService.js
+@@ -41 +41 @@
+-let rootInflight = null;                     // mantido para compat; nÃ£o usado diretamente
++let rootInflight = null; // mantido para compat; nÃ£o usado diretamente
+@@ -42 +42 @@
+-const proofInflight = new Map();             // chave: LS_KEY(root,address) -> Promise<bytes32[]>
++const proofInflight = new Map(); // chave: LS_KEY(root,address) -> Promise<bytes32[]>
+@@ -99 +99 @@
+-    const root = (j && typeof j.merkleRoot === "string") ? j.merkleRoot : null;
++    const root = j && typeof j.merkleRoot === "string" ? j.merkleRoot : null;
+@@ -296 +296 @@
+-  const fileRoot  = await loadRootOnce();
++  const fileRoot = await loadRootOnce();
+@@ -297 +297 @@
+-  const haveRoot  = !isZeroRoot(chainRoot);
++  const haveRoot = !isZeroRoot(chainRoot);
+@@ -307 +307 @@
+-      rootMismatch: false
++      rootMismatch: false,

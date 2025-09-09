@@ -1,0 +1,19 @@
+{
+	"version": "0.2.2",
+	"includes": [
+		""
+	],
+	"permissions": {
+		"authorizationtoken": ""
+	},
+	"connectedServer": {
+		"id": "localhost-8080",
+		"type": "totvs_server_logix",
+		"name": "Localhost",
+		"port": 8080,
+		"address": "127.0.0.1"
+	},
+	"configurations": [],
+	"savedTokens": [],
+	"lastConnectedServer": ""
+}

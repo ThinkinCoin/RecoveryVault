@@ -1,0 +1,14 @@
+--- components/wallet/LimitChecker.jsx
++++ components/wallet/LimitChecker.jsx
+@@ -10 +10 @@
+-  "function dailyLimitUsd() view returns (uint256)",
++        "function dailyLimitUsd() view returns (uint256)",
+@@ -11 +11 @@
+-  "function getUserLimit(address wallet) view returns (uint256)",
++        "function getUserLimit(address wallet) view returns (uint256)",
+@@ -13 +13 @@
+-  "function limitUnlockAt(address) view returns (uint256)",
++        "function limitUnlockAt(address) view returns (uint256)",
+@@ -15 +15 @@
+-]);
++      ];

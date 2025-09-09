@@ -1,0 +1,20 @@
+--- src/ui/layout/footer.jsx
++++ src/ui/layout/footer.jsx
+@@ -12 +12 @@
+-import { FaInstagram, FaGithub, FaTwitter, FaYoutube} from "react-icons/fa"
++import { FaInstagram, FaGithub, FaTwitter, FaYoutube } from "react-icons/fa";
+@@ -95 +95 @@
+-        <div className={styles.credits}>
++      <div className={styles.credits}>
+@@ -97 +97 @@
+-            Â© {new Date().getFullYear()} {" "}
++          Â© {new Date().getFullYear()}{" "}
+@@ -99 +99 @@
+-          </div>
++        </div>
+@@ -100 +100 @@
+-          <div className={`${styles.socialIcons} `}>
++        <div className={`${styles.socialIcons} `}>
+@@ -101 +101 @@
+-{/*             
++          {/*             

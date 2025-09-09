@@ -1,0 +1,5 @@
+--- components/shared/TokenSelect.jsx
++++ components/shared/TokenSelect.jsx
+@@ -49 +49 @@
+-          ? tokenCatalog
++        ? tokenCatalog

@@ -1,0 +1,14 @@
+--- src/store/recoverySlice.js
++++ src/store/recoverySlice.js
+@@ -18 +18 @@
+-  alert: null
++  alert: null,
+@@ -37 +37 @@
+-        isUSDC: Boolean(q.isUSDC)
++        isUSDC: Boolean(q.isUSDC),
+@@ -42 +42 @@
+-    reset: () => initialState
++    reset: () => initialState,
+@@ -54 +54 @@
+-  reset
++  reset,
