@@ -1,5 +1,0 @@
---- src/components/shared/Alert.jsx
-+++ src/components/shared/Alert.jsx
-@@ -3 +3 @@
--export default function Alert({ type="info", title, message, tx }) {
-+export default function Alert({ type = "info", title, message, tx }) {

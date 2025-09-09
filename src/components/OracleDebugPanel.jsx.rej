@@ -1,5 +1,0 @@
---- src/components/OracleDebugPanel.jsx
-+++ src/components/OracleDebugPanel.jsx
-@@ -45 +45 @@
--        setState(s => ({ ...s, msg: e?.message || String(e) }));
-+        setState((s) => ({ ...s, msg: e?.message || String(e) }));

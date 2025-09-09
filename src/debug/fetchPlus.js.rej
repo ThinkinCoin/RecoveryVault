@@ -1,5 +1,0 @@
---- src/debug/fetchPlus.js
-+++ src/debug/fetchPlus.js
-@@ -8 +8 @@
--  let url = typeof input === "string" ? input : (input?.url || "");
-+  let url = typeof input === "string" ? input : input?.url || "";

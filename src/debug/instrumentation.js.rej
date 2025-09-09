@@ -1,5 +1,0 @@
---- debug/instrumentation.js
-+++ debug/instrumentation.js
-@@ -15 +15 @@
--        emit("warn", `Long Task: ${(entry.duration).toFixed(0)}ms`, entry);
-+        emit("warn", `Long Task: ${entry.duration.toFixed(0)}ms`, entry);

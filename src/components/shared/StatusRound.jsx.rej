@@ -1,5 +1,0 @@
---- src/components/shared/StatusRound.jsx
-+++ src/components/shared/StatusRound.jsx
-@@ -24 +24 @@
--  } catch {}
-+  } catch { /* empty */ }
