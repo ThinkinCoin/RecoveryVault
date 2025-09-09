@@ -11,6 +11,7 @@
     "test:integration": "hardhat test test/integration/Integration.test.js test/integration/RecoveryVault.test.js",
     "test": "hardhat test test/RecoveryVault.test.js",
     "coverage": "npx hardhat coverage",
+    "patch": "patch -p1 -i fix.patch -F1 --dry-run --binary",
     "deploy": "hardhat run scripts/deploy.js --network harmony",
     "verify": "hardhat verify --network harmony",
     "merkle": "node scripts/generateMerkle.js",

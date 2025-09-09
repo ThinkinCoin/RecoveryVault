@@ -13,3 +13,4 @@ hardhat.config.js
 vite.config.js
 vitest.config.js
 dist
+fix.patch
