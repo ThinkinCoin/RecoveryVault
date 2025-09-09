@@ -1,6 +1,6 @@
 require('@nomicfoundation/hardhat-toolbox');
 require('@nomicfoundation/hardhat-verify');
-
+require('solidity-coverage');
 require("dotenv").config();
 
 
@@ -31,6 +31,7 @@ module.exports = {
 
     networks: {
       hardhat: {},
+      coverage: { url: 'http://127.0.0.1:8555' },
       harmony: {
         url: process.env.VITE_RPC_URL || '',
         accounts: privateKey ? [`0x${privateKey}`] : [],
