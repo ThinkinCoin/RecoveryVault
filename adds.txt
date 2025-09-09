@@ -1,0 +1,648 @@
+diff --git a/src/debug/instrumentation.js b/src/debug/instrumentation.js
+--- a/src/debug/instrumentation.js
++++ b/src/debug/instrumentation.js
+@@ -15,1 +15,1 @@
+-        emit("warn", `Long Task: ${(entry.duration).toFixed(0)}ms`, entry);
++        emit("warn", `Long Task: ${entry.duration.toFixed(0)}ms`, entry);
+diff --git a/src/pages/AdminDash.jsx b/src/pages/AdminDash.jsx
+--- a/src/pages/AdminDash.jsx
++++ b/src/pages/AdminDash.jsx
+@@ -12,1 +12,1 @@
+-import { getReadContract } from "@/services/vaultCore"
++import { getReadContract } from "@/services/vaultCore";
+@@ -24,1 +24,1 @@
+-async function waitReceipt(tx, signerOrProvider){
++async function waitReceipt(tx, signerOrProvider) {
+@@ -25,1 +25,1 @@
+-  try{
++  try {
+diff --git a/src/services/limitsService.js b/src/services/limitsService.js
+--- a/src/services/limitsService.js
++++ b/src/services/limitsService.js
+@@ -127,1 +127,1 @@
+-      fetchRemainingUsdInt(provider, address),
++        fetchRemainingUsdInt(provider, address),
+diff --git a/src/components/wallet/LimitChecker.jsx b/src/components/wallet/LimitChecker.jsx
+--- a/src/components/wallet/LimitChecker.jsx
++++ b/src/components/wallet/LimitChecker.jsx
+@@ -10,1 +10,1 @@
+-  "function dailyLimitUsd() view returns (uint256)",
++        "function dailyLimitUsd() view returns (uint256)",
+@@ -11,1 +11,1 @@
+-  "function getUserLimit(address wallet) view returns (uint256)",
++        "function getUserLimit(address wallet) view returns (uint256)",
+@@ -13,1 +13,1 @@
+-  "function limitUnlockAt(address) view returns (uint256)",
++        "function limitUnlockAt(address) view returns (uint256)",
+@@ -15,1 +15,1 @@
+-]);
++      ];
+diff --git a/src/services/adminService.js b/src/services/adminService.js
+--- a/src/services/adminService.js
++++ b/src/services/adminService.js
+@@ -3,1 +3,1 @@
+-import { getWriteContract, getReadContract  } from "@/services/vaultCore";
++import { getWriteContract, getReadContract } from "@/services/vaultCore";
+@@ -15,1 +15,1 @@
+-    type: "function"
++    type: "function",
+@@ -16,1 +16,1 @@
+-  }
++  },
+@@ -73,1 +73,1 @@
+-    dec   = r?.decimals ?? (Array.isArray(r) ? r[1] : undefined);
++    dec = r?.decimals ?? (Array.isArray(r) ? r[1] : undefined);
+@@ -90,1 +90,1 @@
+-      to: contract.target,         // ethers v6
++      to: contract.target, // ethers v6
+@@ -91,1 +91,1 @@
+-      data
++      data,
+@@ -102,1 +102,1 @@
+-export async function setDailyLimit(signer, amountLike){
++export async function setDailyLimit(signer, amountLike) {
+@@ -119,1 +119,1 @@
+-export async function setDevWallet(signer, wallet){
++export async function setDevWallet(signer, wallet) {
+@@ -131,1 +131,1 @@
+-export async function setFixedUsdPrice(signer, token, usdPrice18){
++export async function setFixedUsdPrice(signer, token, usdPrice18) {
+@@ -159,1 +159,1 @@
+-export async function setRmcWallet(signer, wallet){
++export async function setRmcWallet(signer, wallet) {
+diff --git a/src/components/redeem/RedeemForm.jsx b/src/components/redeem/RedeemForm.jsx
+--- a/src/components/redeem/RedeemForm.jsx
++++ b/src/components/redeem/RedeemForm.jsx
+@@ -20,1 +20,1 @@
+-  "function allowance(address owner, address spender) view returns (uint256)"
++  "function allowance(address owner, address spender) view returns (uint256)",
+@@ -31,1 +31,1 @@
+-async function getTokenMetaCached(provider, addr){
++async function getTokenMetaCached(provider, addr) {
+@@ -38,1 +38,1 @@
+-      erc.symbol().catch(() => "TOKEN")
++      erc.symbol().catch(() => "TOKEN"),
+@@ -53,1 +53,1 @@
+-  const f = BigInt(Math.max(0, fractionDigits|0));
++  const f = BigInt(Math.max(0, fractionDigits | 0));
+@@ -76,1 +76,1 @@
+-function rpcFriendly(e){
++function rpcFriendly(e) {
+diff --git a/src/helpers/proof.js b/src/helpers/proof.js
+--- a/src/helpers/proof.js
++++ b/src/helpers/proof.js
+@@ -28,1 +28,1 @@
+-async function fetchFirstOk(urls){
++async function fetchFirstOk(urls) {
+@@ -29,1 +29,1 @@
+-  for (const u of urls){
++  for (const u of urls) {
+@@ -40,1 +40,1 @@
+-function toBytes32Array(arr){
++function toBytes32Array(arr) {
+@@ -43,1 +43,1 @@
+-  for (const v of arr){
++  for (const v of arr) {
+@@ -55,1 +55,1 @@
+-async function loadOnce(){
++async function loadOnce() {
+@@ -60,1 +60,1 @@
+-  if (proofsJson && typeof proofsJson === "object"){
++  if (proofsJson && typeof proofsJson === "object") {
+@@ -65,1 +65,1 @@
+-    if (proofsJson.proofs && typeof proofsJson.proofs === "object"){
++    if (proofsJson.proofs && typeof proofsJson.proofs === "object") {
+@@ -74,1 +74,1 @@
+-    for (const [addr, proofArr] of Object.entries(mapRaw)){
++    for (const [addr, proofArr] of Object.entries(mapRaw)) {
+@@ -81,1 +81,1 @@
+-  if (!CACHE.merkleRoot){
++  if (!CACHE.merkleRoot) {
+@@ -83,1 +83,1 @@
+-    if (rootJson && typeof rootJson.merkleRoot === "string"){
++    if (rootJson && typeof rootJson.merkleRoot === "string") {
+@@ -97,1 +97,1 @@
+-export async function preloadProofs(){
++export async function preloadProofs() {
+@@ -105,1 +105,1 @@
+-export async function getMerkleRoot(){
++export async function getMerkleRoot() {
+@@ -115,1 +115,1 @@
+-export async function getProofFor(address){
++export async function getProofFor(address) {
+diff --git a/src/contexts/ContractContext.jsx b/src/contexts/ContractContext.jsx
+--- a/src/contexts/ContractContext.jsx
++++ b/src/contexts/ContractContext.jsx
+@@ -11,1 +11,1 @@
+-  useRef
++  useRef,
+@@ -76,1 +76,1 @@
+-  disconnect: async () => {}
++  disconnect: async () => {},
+@@ -129,1 +129,1 @@
+-    clearBuildTimer();
++      clearBuildTimer();
+@@ -130,1 +130,1 @@
+-    buildTimerRef.current = setTimeout(async () => {
++      buildTimerRef.current = setTimeout(async () => {
+@@ -131,1 +131,1 @@
+-      try {
++        try {
+@@ -132,1 +132,1 @@
+-        if (unmountedRef.current) return;
++          if (unmountedRef.current) return;
+@@ -133,1 +133,1 @@
+-        const s = await buildSigner(prov);
++          const s = await buildSigner(prov);
+@@ -135,1 +135,1 @@
+-      } catch (e) {
++        } catch (e) {
+@@ -137,1 +137,1 @@
+-        if (!unmountedRef.current) setSigner(null);
++          if (!unmountedRef.current) setSigner(null);
+@@ -139,1 +139,1 @@
+-    }, Math.max(0, Number(delayMs) || 0));
++      }, Math.max(0, Number(delayMs) || 0));
+diff --git a/src/components/wallet/WalletChecker.jsx b/src/components/wallet/WalletChecker.jsx
+--- a/src/components/wallet/WalletChecker.jsx
++++ b/src/components/wallet/WalletChecker.jsx
+@@ -82,1 +82,1 @@
+-    lastRef.current = { addr: effectiveAddress, eligible: eligibleVal };
++      lastRef.current = { addr: effectiveAddress, eligible: eligibleVal };
+@@ -106,1 +106,1 @@
+-      : !whitelistOn
++    : !whitelistOn
+@@ -108,1 +108,1 @@
+-        : eligible
++    : eligible
+@@ -109,1 +109,1 @@
+-          ? "success"
++    ? "success"
+@@ -110,1 +110,1 @@
+-          : error
++    : error
+@@ -111,1 +111,1 @@
+-            ? "denied"
++    ? "denied"
+@@ -115,1 +115,1 @@
+-    display: "inline-flex",
++      display: "inline-flex",
+@@ -117,1 +117,1 @@
+-    gap: 6,
++      gap: 6,
+@@ -118,1 +118,1 @@
+-    padding: compact ? "6px 10px" : "10px 14px",
++      padding: compact ? "6px 10px" : "10px 14px",
+diff --git a/src/components/shared/TokenSelect.jsx b/src/components/shared/TokenSelect.jsx
+--- a/src/components/shared/TokenSelect.jsx
++++ b/src/components/shared/TokenSelect.jsx
+@@ -49,1 +49,1 @@
+-          ? tokenCatalog
++        ? tokenCatalog
+diff --git a/vite.config.js b/vite.config.js
+--- a/vite.config.js
++++ b/vite.config.js
+@@ -15,1 +15,1 @@
+-      "@": path.resolve(__dirname, "src")
++      "@": path.resolve(__dirname, "src"),
+@@ -22,1 +22,1 @@
+-    open: true
++    open: true,
+@@ -26,1 +26,1 @@
+-    port: 3001
++    port: 3001,
+@@ -38,1 +38,1 @@
+-      "dist/**"
++      "dist/**",
+@@ -46,1 +46,1 @@
+-    passWithNoTests: false
++    passWithNoTests: false,
+diff --git a/src/components/shared/StatusRound.jsx b/src/components/shared/StatusRound.jsx
+--- a/src/components/shared/StatusRound.jsx
++++ b/src/components/shared/StatusRound.jsx
+@@ -108,1 +108,1 @@
+-    const hasFunds = (w > 0n) || (u > 0n);
++    const hasFunds = w > 0n || u > 0n;
+@@ -164,1 +164,1 @@
+-          
++          </div>
+diff --git a/vitest.config.js b/vitest.config.js
+--- a/vitest.config.js
++++ b/vitest.config.js
+@@ -15,1 +15,1 @@
+-      "@": path.resolve(__dirname, "src")
++      "@": path.resolve(__dirname, "src"),
+@@ -16,1 +16,1 @@
+-    }
++    },
+@@ -19,1 +19,1 @@
+-    host: true,   // permite acesso via LAN
++    host: true, // permite acesso via LAN
+@@ -20,1 +20,1 @@
+-    port: 3000,   // ajuste se necessÃ¡rio
++    port: 3000, // ajuste se necessÃ¡rio
+@@ -22,1 +22,1 @@
+-    open: true
++    open: true,
+@@ -38,1 +38,1 @@
+-      "dist/**"
++      "dist/**",
+diff --git a/src/services/whitelistService.js b/src/services/whitelistService.js
+--- a/src/services/whitelistService.js
++++ b/src/services/whitelistService.js
+@@ -41,1 +41,1 @@
+-let rootInflight = null;                     // mantido para compat; nÃ£o usado diretamente
++let rootInflight = null; // mantido para compat; nÃ£o usado diretamente
+@@ -42,1 +42,1 @@
+-const proofInflight = new Map();             // chave: LS_KEY(root,address) -> Promise<bytes32[]>
++const proofInflight = new Map(); // chave: LS_KEY(root,address) -> Promise<bytes32[]>
+@@ -99,1 +99,1 @@
+-    const root = (j && typeof j.merkleRoot === "string") ? j.merkleRoot : null;
++    const root = j && typeof j.merkleRoot === "string" ? j.merkleRoot : null;
+@@ -296,1 +296,1 @@
+-  const fileRoot  = await loadRootOnce();
++  const fileRoot = await loadRootOnce();
+@@ -297,1 +297,1 @@
+-  const haveRoot  = !isZeroRoot(chainRoot);
++  const haveRoot = !isZeroRoot(chainRoot);
+@@ -307,1 +307,1 @@
+-      rootMismatch: false
++      rootMismatch: false,
+diff --git a/src/components/OracleDebugPanel.jsx b/src/components/OracleDebugPanel.jsx
+--- a/src/components/OracleDebugPanel.jsx
++++ b/src/components/OracleDebugPanel.jsx
+@@ -45,1 +45,1 @@
+-        setState(s => ({ ...s, msg: e?.message || String(e) }));
++        setState((s) => ({ ...s, msg: e?.message || String(e) }));
+diff --git a/src/services/vaultCore.js b/src/services/vaultCore.js
+--- a/src/services/vaultCore.js
++++ b/src/services/vaultCore.js
+@@ -11,1 +11,1 @@
+-  "function approve(address spender, uint256 amount) returns (bool)"
++  "function approve(address spender, uint256 amount) returns (bool)",
+@@ -15,1 +15,1 @@
+-export const USD_SCALE_BI = 10_000n;     // 1e4 (USD4)
++export const USD_SCALE_BI = 10_000n; // 1e4 (USD4)
+@@ -16,1 +16,1 @@
+-export const USD_1e18_BI  = 10n ** 18n;  // 1e18 (USD18)
++export const USD_1e18_BI = 10n ** 18n; // 1e18 (USD18)
+@@ -29,1 +29,1 @@
+-export async function setDailyLimitUsd18(signer, usd18BigInt){
++export async function setDailyLimitUsd18(signer, usd18BigInt) {
+@@ -41,1 +41,1 @@
+-  const url = import.meta.env.VITE_RPC_URL;          // ex.: https://api.harmony.one
++  const url = import.meta.env.VITE_RPC_URL; // ex.: https://api.harmony.one
+diff --git a/src/hooks/useOnePrice.js b/src/hooks/useOnePrice.js
+--- a/src/hooks/useOnePrice.js
++++ b/src/hooks/useOnePrice.js
+@@ -20,1 +20,1 @@
+-  const [price, setPrice] = useState(/** @type {number|null} */(null));
++  const [price, setPrice] = useState(/** @type {number|null} */ (null));
+diff --git a/src/services/txUtils.js b/src/services/txUtils.js
+--- a/src/services/txUtils.js
++++ b/src/services/txUtils.js
+@@ -3,1 +3,1 @@
+-import { Interface, isHexString  } from "ethers";
++import { Interface, isHexString } from "ethers";
+@@ -23,1 +23,1 @@
+-    try {
++  try {
+@@ -24,1 +24,1 @@
+-      const raw = import.meta?.env?.VITE_GAS_LIMIT;
++    const raw = import.meta?.env?.VITE_GAS_LIMIT;
+@@ -25,1 +25,1 @@
+-      const v = BigInt(raw);
++    const v = BigInt(raw);
+@@ -26,1 +26,1 @@
+-      return v > 0n ? v : 5_000_000n;
++    return v > 0n ? v : 5_000_000n;
+@@ -28,1 +28,1 @@
+-  })();
++})();
+@@ -33,1 +33,1 @@
+-      const raw = import.meta?.env?.VITE_GAS_PRICE_GWEI;
++    const raw = import.meta?.env?.VITE_GAS_PRICE_GWEI;
+@@ -34,1 +34,1 @@
+-      const v = parseDecimalToBigInt(raw, 9); // gwei â wei
++    const v = parseDecimalToBigInt(raw, 9); // gwei â wei
+@@ -35,1 +35,1 @@
+-      return (v != null && v > 0n) ? v : null;
++    return v != null && v > 0n ? v : null;
+diff --git a/src/services/appkit.js b/src/services/appkit.js
+--- a/src/services/appkit.js
++++ b/src/services/appkit.js
+@@ -2,1 +2,1 @@
+-import { createAppKit } from '@reown/appkit/react';
++import { createAppKit } from "@reown/appkit/react";
+@@ -3,1 +3,1 @@
+-import { EthersAdapter } from '@reown/appkit-adapter-ethers';
++import { EthersAdapter } from "@reown/appkit-adapter-ethers";
+@@ -4,1 +4,1 @@
+-import { defineChain } from '@reown/appkit/networks';
++import { defineChain } from "@reown/appkit/networks";
+@@ -5,1 +5,1 @@
+-import { JsonRpcProvider } from 'ethers';
++import { JsonRpcProvider } from "ethers";
+@@ -8,1 +8,1 @@
+-const DEFAULT_RPC_FALLBACK = 'https://api.harmony.one';
++const DEFAULT_RPC_FALLBACK = "https://api.harmony.one";
+@@ -14,1 +14,1 @@
+-    DEFAULT_RPC_FALLBACK
++    DEFAULT_RPC_FALLBACK,
+@@ -28,1 +28,1 @@
+-    if (url.protocol !== 'https:') url.protocol = 'https:';
++    if (url.protocol !== "https:") url.protocol = "https:";
+@@ -36,1 +36,1 @@
+-export const PROJECT_ID = (import.meta.env.VITE_REOWN_PROJECT_ID || '').trim();
++export const PROJECT_ID = (import.meta.env.VITE_REOWN_PROJECT_ID || "").trim();
+@@ -42,1 +42,1 @@
+-  chainNamespace: 'eip155',
++  chainNamespace: "eip155",
+@@ -44,1 +44,1 @@
+-  nativeCurrency: { name: 'ONE', symbol: 'ONE', decimals: 18 },
++  nativeCurrency: { name: "ONE", symbol: "ONE", decimals: 18 },
+@@ -47,1 +47,1 @@
+-  testnet: false
++  testnet: false,
+@@ -69,1 +69,1 @@
+-    console.error('[appkit] JsonRpcProvider creation failed:', e);
++    console.error("[appkit] JsonRpcProvider creation failed:", e);
+@@ -76,1 +76,1 @@
+-let appkit = /** @type {import('@reown/appkit/react').AppKit | null} */(null);
++let appkit = /** @type {import('@reown/appkit/react').AppKit | null} */ (null);
+@@ -89,1 +89,1 @@
+-    networks: [harmony],
++    defaultNetwork: harmony,
+@@ -94,1 +94,1 @@
+-    enableWallets: true,
++    enableWalletConnect: true,
+diff --git a/src/components/shared/Alert.jsx b/src/components/shared/Alert.jsx
+--- a/src/components/shared/Alert.jsx
++++ b/src/components/shared/Alert.jsx
+@@ -3,1 +3,1 @@
+-export default function Alert({ type="info", title, message, tx }) {
++export default function Alert({ type = "info", title, message, tx }) {
+diff --git a/src/debug/fetchPlus.js b/src/debug/fetchPlus.js
+--- a/src/debug/fetchPlus.js
++++ b/src/debug/fetchPlus.js
+@@ -8,1 +8,1 @@
+-  let url = typeof input === "string" ? input : (input?.url || "");
++  let url = typeof input === "string" ? input : input?.url || "";
+diff --git a/hardhat.config.js b/hardhat.config.js
+--- a/hardhat.config.js
++++ b/hardhat.config.js
+@@ -1,1 +1,1 @@
+-require('@nomicfoundation/hardhat-toolbox');
++require("@nomicfoundation/hardhat-toolbox");
+@@ -2,1 +2,1 @@
+-require('@nomicfoundation/hardhat-verify');
++require("@nomicfoundation/hardhat-verify");
+@@ -16,1 +16,1 @@
+-  defaultNetwork: 'hardhat',
++
+@@ -19,1 +19,1 @@
+-    version: '0.8.18',
++    version: "0.8.18",
+@@ -32,1 +32,1 @@
+-    networks: {
++  networks: {
+@@ -33,1 +33,1 @@
+-      hardhat: {},
++    hardhat: {},
+@@ -34,1 +34,1 @@
+-      harmony: {
++    harmony: {
+@@ -35,1 +35,1 @@
+-        url: process.env.VITE_RPC_URL || '',
++      url: process.env.VITE_RPC_URL || "",
+@@ -36,1 +36,1 @@
+-        accounts: privateKey ? [`0x${privateKey}`] : [],
++      accounts: privateKey ? [`0x${privateKey}`] : [],
+@@ -37,1 +37,1 @@
+-        gasPrice: 1_000_000_000, // 1 gwei
++      gasPrice: 1_000_000_000, // 1 gwei
+@@ -38,1 +38,1 @@
+-      }
++    },
+@@ -41,1 +41,1 @@
+-    etherscan: {
++  etherscan: {
+@@ -42,1 +42,1 @@
+-      apiKey: {
++    apiKey: {
+@@ -45,1 +45,1 @@
+-      customChains: [
++    customChains: [
+@@ -46,1 +46,1 @@
+-        {
++      {
+@@ -48,1 +48,1 @@
+-          chainId: 1666600000,
++        chainId: 1666600000,
+@@ -49,1 +49,1 @@
+-          urls: {
++        urls: {
+@@ -50,1 +50,1 @@
+-            apiURL: 'https://explorer.harmony.one/api',
++          apiURL: "https://explorer.harmony.one/api",
+@@ -59,1 +59,1 @@
+-      target: 'ethers-v6'
++    target: "ethers-v6",
+diff --git a/src/store/index.js b/src/store/index.js
+--- a/src/store/index.js
++++ b/src/store/index.js
+@@ -11,1 +11,1 @@
+-    recovery: recoveryReducer
++    recovery: recoveryReducer,
+@@ -15,1 +15,1 @@
+-      serializableCheck: false
++      serializableCheck: false,
+@@ -17,1 +17,1 @@
+-  devTools: true
++  devTools: true,
+diff --git a/src/hooks/useRedeem.js b/src/hooks/useRedeem.js
+--- a/src/hooks/useRedeem.js
++++ b/src/hooks/useRedeem.js
+@@ -62,1 +62,1 @@
+-    if (!readProvider) {
++      if (!readProvider) {
+@@ -64,1 +64,1 @@
+-      return null;
++        return null;
+@@ -65,1 +65,1 @@
+-    }
++      }
+@@ -69,1 +69,1 @@
+-      setSafe(() => {
++        setSafe(() => {
+@@ -70,1 +70,1 @@
+-        setPlan(p);
++          setPlan(p);
+@@ -71,1 +71,1 @@
+-        setDisplay(p?.display || null);
++          setDisplay(p?.display || null);
+@@ -74,1 +74,1 @@
+-        setState(p?.ok ? "ready" : "blocked");
++          setState(p?.ok ? "ready" : "blocked");
+@@ -75,1 +75,1 @@
+-      });
++        });
+@@ -76,1 +76,1 @@
+-      return p;
++        return p;
+@@ -77,1 +77,1 @@
+-    } catch (e){
++      } catch (e) {
+@@ -89,1 +89,1 @@
+-    const onProgress = (stage) => {
++      const onProgress = (stage) => {
+@@ -92,1 +92,1 @@
+-        if (stage === "approving") setState("approving");
++          if (stage === "approving") setState("approving");
+@@ -93,1 +93,1 @@
+-        if (stage === "redeeming") setState("redeeming");
++          if (stage === "redeeming") setState("redeeming");
+@@ -98,1 +98,1 @@
+-    };
++      };
+@@ -105,1 +105,1 @@
+-        setProgress("done");
++          setProgress("done");
+@@ -107,1 +107,1 @@
+-      return res;
++        return res;
+diff --git a/src/pages/Recovery.jsx b/src/pages/Recovery.jsx
+--- a/src/pages/Recovery.jsx
++++ b/src/pages/Recovery.jsx
+@@ -125,1 +125,1 @@
+-  }, [account, readProvider, appkitAccount?.address]);
++  }, [account, readProvider, appkitAccount.address, appkitAccount]);
+diff --git a/src/ui/layout/footer.jsx b/src/ui/layout/footer.jsx
+--- a/src/ui/layout/footer.jsx
++++ b/src/ui/layout/footer.jsx
+@@ -12,1 +12,1 @@
+-import { FaInstagram, FaGithub, FaTwitter, FaYoutube} from "react-icons/fa"
++import { FaInstagram, FaGithub, FaTwitter, FaYoutube } from "react-icons/fa";
+@@ -95,1 +95,1 @@
+-        <div className={styles.credits}>
++      <div className={styles.credits}>
+@@ -97,1 +97,1 @@
+-            Â© {new Date().getFullYear()} {" "}
++          Â© {new Date().getFullYear()}{" "}
+@@ -99,1 +99,1 @@
+-          </div>
++        </div>
+@@ -100,1 +100,1 @@
+-          <div className={`${styles.socialIcons} `}>
++        <div className={`${styles.socialIcons} `}>
+@@ -101,1 +101,1 @@
+-{/*             
++          {/*             
+diff --git a/src/debug/logger.js b/src/debug/logger.js
+--- a/src/debug/logger.js
++++ b/src/debug/logger.js
+@@ -16,1 +16,1 @@
+-export const log  = (m) => emit("info", m);
++export const log = (m) => emit("info", m);
+@@ -19,1 +19,1 @@
+-export const error= (m) => emit("error", m);
++export const error = (m) => emit("error", m);
+diff --git a/src/store/recoverySlice.js b/src/store/recoverySlice.js
+--- a/src/store/recoverySlice.js
++++ b/src/store/recoverySlice.js
+@@ -18,1 +18,1 @@
+-  alert: null
++  alert: null,
+@@ -37,1 +37,1 @@
+-        isUSDC: Boolean(q.isUSDC)
++        isUSDC: Boolean(q.isUSDC),
+@@ -42,1 +42,1 @@
+-    reset: () => initialState
++    reset: () => initialState,
+@@ -54,1 +54,1 @@
+-  reset
++  reset,
+diff --git a/src/main.jsx b/src/main.jsx
+--- a/src/main.jsx
++++ b/src/main.jsx
+@@ -25,1 +25,1 @@
+-      <ReownProvider>
++    <ReownProvider>
+@@ -28,1 +28,1 @@
+-            <App />
++          <App />
+@@ -29,1 +29,1 @@
+-          </HashRouter>
++        </HashRouter>
+@@ -31,1 +31,1 @@
+-      </ReownProvider>
++    </ReownProvider>
+@@ -32,1 +32,1 @@
+-    </Provider>
++  </Provider>
+diff --git a/src/ErrorBoundary.jsx b/src/ErrorBoundary.jsx
+--- a/src/ErrorBoundary.jsx
++++ b/src/ErrorBoundary.jsx
+@@ -6,1 +6,1 @@
+-  componentDidCatch(err, info){
++  componentDidCatch(err, info) {
+@@ -8,1 +8,1 @@
+-      console.error('[ErrorBoundary]', err, info);
++      console.error("[ErrorBoundary]", err, info);
+@@ -9,1 +9,1 @@
+-      const el = document.getElementById('__panic_overlay__');
++      const el = document.getElementById("__panic_overlay__");
+@@ -17,1 +17,1 @@
+-  render(){
++  render() {
+@@ -20,1 +20,1 @@
+-        <div style={{padding:16}}>
++        <div style={{ padding: 16 }}>
+diff --git a/test/unit/vaultService.test.jsx b/test/unit/vaultService.test.jsx
+--- a/test/unit/vaultService.test.jsx
++++ b/test/unit/vaultService.test.jsx
+@@ -2,1 +2,1 @@
+-import { describe, it, expect, vi } from 'vitest';
++import { describe, it, expect, vi } from "vitest";
+@@ -4,1 +4,1 @@
+-import { parseEther } from 'viem/utils';
++import { parseEther } from "viem/utils";
+@@ -6,1 +6,1 @@
+-vi.mock('../../src/utils/contractInstance', () => ({
++vi.mock("../../src/utils/contractInstance", () => ({
+@@ -10,1 +10,1 @@
+-    ]),
++      ]),
+@@ -12,1 +12,1 @@
+-  }))
++  })),
+@@ -15,1 +15,1 @@
+-describe('vaultService', () => {
++describe("vaultService", () => {
+@@ -18,1 +18,1 @@
+-      user: '0xabc',
++      user: "0xabc",
+@@ -19,1 +19,1 @@
+-      tokenIn: '0xwone',
++      tokenIn: "0xwone",
+@@ -22,1 +22,1 @@
+-      proof: []
++      proof: [],
+@@ -30,1 +30,1 @@
+-  it('should get user limit correctly', async () => {
++  it("should get user limit correctly", async () => {
+@@ -31,1 +31,1 @@
+-    const limit = await vaultService.getUserLimit('0xabc', {});
++    const limit = await vaultService.getUserLimit("0xabc", {});
+diff --git a/src/components/shared/ContractFunds.jsx b/src/components/shared/ContractFunds.jsx
+--- a/src/components/shared/ContractFunds.jsx
++++ b/src/components/shared/ContractFunds.jsx
+@@ -148,1 +148,1 @@
+-      const u = Number(status?.balances?.usdc ?? 0n) / 1e6;   // USDC 6 decimals
++      const u = Number(status?.balances?.usdc ?? 0n) / 1e6; // USDC 6 decimals
+@@ -166,1 +166,1 @@
+-        bps        = Array.isArray(tiers?.bps)        ? tiers.bps        : tiers?.feeBps;
++        bps = Array.isArray(tiers?.bps) ? tiers.bps : tiers?.feeBps;
+@@ -174,1 +174,1 @@
+-        bps        = status.feeBps ?? [];
++        bps = status.feeBps ?? [];

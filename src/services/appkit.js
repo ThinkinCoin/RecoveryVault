@@ -47,18 +47,48 @@ export const harmony = defineChain({
   testnet: false
 });
 
+// --- Dynamic metadata (prod/dev) ---
 const isProd = import.meta.env.PROD;
+const HOST = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
 const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
-const appUrl = isProd ? (import.meta.env.VITE_REOWN_APP_URL?.trim() || origin) : origin;
-const appIconRaw = isProd ? (import.meta.env.VITE_REOWN_APP_ICON?.trim() || `${appUrl}/icon-512.png`) : `${origin}/icon-512.png`;
-const appIcon = isProd ? toHttps(appIconRaw) : appIconRaw;
+const isDevHost = /(^|\.)recoverydev\.thinkincoin\.com$/i.test(HOST);
+
+// Always use the actual page origin to avoid WalletConnect metadata.url mismatch
+const appUrl = origin;
+
+// Choose icon per host (dev/prod), fallback to current origin asset
+const appIconRaw =
+  (isDevHost ? (import.meta.env.VITE_REOWN_DEV_ICON?.trim()) : (import.meta.env.VITE_REOWN_APP_ICON?.trim()))
+  || `${origin}/icon-512.png`;
+const appIcon = toHttps(appIconRaw);
 
 const metadata = {
   name: import.meta.env.VITE_PROJECT_NAME || import.meta.env.VITE_APP_NAME || 'Recovery Vault',
   description: 'Fixed redemption UI for pre-hack wallets (Harmony only)',
-  url: appUrl,
+  url: origin, // <- critical: match current origin
   icons: [appIcon]
 };
+
+// --- Purge stale WalletConnect v2 sessions when origin changes ---
+function purgeWalletConnectIfOriginChanged() {
+  try {
+    const KEY = 'app:lastOrigin';
+    const cur = (typeof window !== 'undefined' && window.location?.origin) || '';
+    const last = localStorage.getItem(KEY);
+    if (last && last !== cur) {
+      const keys = Object.keys(localStorage);
+      for (const k of keys) {
+        const kl = k.toLowerCase();
+        if (kl.startsWith('wc@2') || kl.includes('walletconnect')) {
+          localStorage.removeItem(k);
+        }
+      }
+    }
+    if (cur) localStorage.setItem(KEY, cur);
+  } catch (e) {
+    console.warn('[appkit] purgeWalletConnectIfOriginChanged failed:', e);
+  }
+}
 
 let _readProvider = /** @type {JsonRpcProvider|null} */ (null);
 export function getReadProvider() {
@@ -76,10 +106,10 @@ export const readProvider = getReadProvider();
 let appkit = /** @type {import('@reown/appkit/react').AppKit | null} */(null);
 
 export function ensureInit() {
+  try { purgeWalletConnectIfOriginChanged(); } catch (e) { console.warn('[appkit] purge failed:', e); }
   if (appkit || !PROJECT_ID) return appkit;
 
   const ethersAdapter = new EthersAdapter();
-
   const debugFlag = String(import.meta.env.VITE_APPKIT_DEBUG ?? (import.meta.env.DEV ? 'true' : 'false')) === 'true';
 
   appkit = createAppKit({
