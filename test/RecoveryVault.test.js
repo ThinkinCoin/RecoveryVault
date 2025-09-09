@@ -219,10 +219,10 @@ describe("RecoveryVault", () => {
     const { vault, owner, dev, rmc, usdc, other } = await deployFixture();
     await expect(vault.connect(other).setLocked(true)).to.be.revertedWith("Ownable: caller is not the owner");
 
-    // Chamadas diretas para setDevWallet e setRmcWallet sem verificar eventos
-    await (await vault.setDevWallet(other.address)).wait();
-    await (await vault.setDevWallet(dev.address)).wait();
-    await (await vault.setRmcWallet(rmc.address)).wait();
+    // Apenas chamadas diretas para setDevWallet e setRmcWallet
+    await vault.setDevWallet(other.address);
+    await vault.setDevWallet(dev.address);
+    await vault.setRmcWallet(rmc.address);
 
     // Update fee tiers (len check)
     await expect(vault.setFeeTiers([100, 200], [100, 50])).to.be.revertedWith("Invalid fee config");
