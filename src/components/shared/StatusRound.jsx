@@ -21,7 +21,7 @@ function toNum(v, d = 0) {
     if (typeof v === "bigint") return Number(v);
     if (typeof v === "number") return v;
     if (typeof v === "string" && v.trim() !== "") return Number(v);
-  } catch { /* empty */ }
+  } catch {}
   return d;
 }
 
