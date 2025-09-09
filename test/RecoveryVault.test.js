@@ -219,7 +219,7 @@ describe("RecoveryVault", () => {
     const { vault, owner, dev, rmc, usdc, other } = await deployFixture();
     await expect(vault.connect(other).setLocked(true)).to.be.revertedWith("Ownable: caller is not the owner");
 
-    await expect(vault.setDevWallet(other.address)).to.emit(vault, "VaultPaused").or.not; // setDevWallet não emite; apenas checamos chamada
+    // Chamadas diretas para setDevWallet e setRmcWallet sem verificar eventos
     await (await vault.setDevWallet(other.address)).wait();
     await (await vault.setDevWallet(dev.address)).wait();
     await (await vault.setRmcWallet(rmc.address)).wait();
