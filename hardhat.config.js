@@ -3,6 +3,11 @@ require('@nomicfoundation/hardhat-verify');
 require('solidity-coverage');
 require("dotenv").config();
 
+<<<<<<< HEAD
+=======
+require("dotenv").config();
+
+>>>>>>> 296d7f552d0e0b4ee56bffd4f48c9f48b841229d
 
 const privateKey = process.env.DEPLOYER_PKEY || '';
 // Fallback initialOwner if not set via environment
