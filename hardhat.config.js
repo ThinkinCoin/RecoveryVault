@@ -1,8 +1,13 @@
 require('@nomicfoundation/hardhat-toolbox');
 require('@nomicfoundation/hardhat-verify');
-
+require('solidity-coverage');
 require("dotenv").config();
 
+<<<<<<< HEAD
+=======
+require("dotenv").config();
+
+>>>>>>> 296d7f552d0e0b4ee56bffd4f48c9f48b841229d
 
 const privateKey = process.env.DEPLOYER_PKEY || '';
 // Fallback initialOwner if not set via environment
@@ -31,6 +36,7 @@ module.exports = {
 
     networks: {
       hardhat: {},
+      coverage: { url: 'http://127.0.0.1:8555' },
       harmony: {
         url: process.env.VITE_RPC_URL || '',
         accounts: privateKey ? [`0x${privateKey}`] : [],
